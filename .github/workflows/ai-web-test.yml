@@ -1,0 +1,38 @@
+name: AI Web Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 2 * * *'
+
+jobs:
+  web-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      # Start the target app in the host project's preferred way before this
+      # step, or use target.startCommand with a local process manager.
+      - run: npm run build
+      - run: node dist/cli.js discover --config ai-web-test.config.json --static-only --json > discovery.json
+      - run: node dist/cli.js plan --config ai-web-test.config.json --preset ci-smoke --non-interactive --json > plan.json
+      # A production pipeline should extract the plan id and approve it through
+      # its own protected environment/approval mechanism.
+      - run: node dist/cli.js approve --config ai-web-test.config.json --plan "$(node -e "console.log(require('./plan.json').plan.id)")" --yes --by ci --json
+      - run: node dist/cli.js run --config ai-web-test.config.json --plan "$(node -e "console.log(require('./plan.json').plan.id)")" --json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ai-web-test-evidence
+          path: |
+            .ai-web-test/
+            discovery.json
+            plan.json

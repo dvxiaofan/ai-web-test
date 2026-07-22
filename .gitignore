@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+
+# Build and type-check output
+dist/
+coverage/
+*.tsbuildinfo
+
+# AI Web Test runtime artifacts
+.ai-web-test/
+.tmp-e2e-runs/
+playwright-report/
+blob-report/
+test-results/
+.playwright/
+auth/
+.auth/
+storage-state*.json
+
+# Local-only verification files
+tsconfig.check.json
+tsconfig.build-check.json
+vitest.check.config.mjs
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Tool caches and package artifacts
+.cache/
+.turbo/
+.eslintcache
+.npm/
+*.tgz
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/

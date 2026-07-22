@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ai-web-test.config.schema.json",
+  "title": "AI Web Test configuration",
+  "type": "object",
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "project": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "target": {
+      "type": "object",
+      "properties": {
+        "rootDir": { "type": "string", "minLength": 1 },
+        "baseUrl": { "type": "string", "format": "uri", "pattern": "^https?://" },
+        "startCommand": { "type": "string" },
+        "workingDirectory": { "type": "string" },
+        "environment": { "type": "string" },
+        "env": { "type": "object", "additionalProperties": { "type": "string" } },
+        "allowProductionLikeHost": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "artifacts": {
+      "type": "object",
+      "properties": {
+        "directory": { "type": "string" },
+        "retainRuns": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "include": { "$ref": "#/$defs/stringArray" },
+        "exclude": { "$ref": "#/$defs/stringArray" },
+        "maxFiles": { "type": "integer", "minimum": 1 },
+        "maxFileSizeBytes": { "type": "integer", "minimum": 1 },
+        "followSymlinks": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "headless": { "type": "boolean" },
+        "navigationTimeoutMs": { "type": "integer", "minimum": 100 },
+        "actionTimeoutMs": { "type": "integer", "minimum": 100 },
+        "maxPages": { "type": "integer", "minimum": 1 },
+        "ignoreHTTPSErrors": { "type": "boolean" },
+        "profiles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id"],
+            "properties": {
+              "id": { "type": "string" },
+              "browser": { "enum": ["chromium", "firefox", "webkit"] },
+              "headless": { "type": "boolean" },
+              "viewport": {
+                "type": "object",
+                "required": ["width", "height"],
+                "properties": {
+                  "width": { "type": "integer", "minimum": 320 },
+                  "height": { "type": "integer", "minimum": 240 }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "roles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "storageStatePath": { "type": "string" },
+          "usernameEnv": { "$ref": "#/$defs/envName" },
+          "passwordEnv": { "$ref": "#/$defs/envName" },
+          "setupScenarioId": { "type": "string" },
+          "default": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "policy": {
+      "type": "object",
+      "properties": {
+        "maxRisk": { "enum": ["read", "mutate", "destructive"] },
+        "allowedHosts": { "$ref": "#/$defs/stringArray" },
+        "blockedHosts": { "$ref": "#/$defs/stringArray" },
+        "allowExternalOrigins": { "type": "boolean" },
+        "allowedActionNames": { "$ref": "#/$defs/stringArray" },
+        "blockedActionNames": { "$ref": "#/$defs/stringArray" },
+        "destructiveActionAllowlist": { "$ref": "#/$defs/stringArray" },
+        "requireTestDataNamespace": { "type": "boolean" },
+        "testDataNamespace": { "type": "string" },
+        "allowProductionLikeHosts": { "type": "boolean" },
+        "confirmationRequired": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "ai": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "provider": { "type": "string" },
+        "model": { "type": "string" },
+        "apiKeyEnv": { "$ref": "#/$defs/envName" },
+        "sendSource": { "type": "boolean" },
+        "sendScreenshots": { "type": "boolean" },
+        "maxContextChars": { "type": "integer", "minimum": 1000 }
+      },
+      "additionalProperties": false
+    },
+    "presets": { "type": "object", "additionalProperties": { "type": "object" } }
+  },
+  "$defs": {
+    "stringArray": { "type": "array", "items": { "type": "string" } },
+    "envName": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" }
+  },
+  "additionalProperties": true
+}

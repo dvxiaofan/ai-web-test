@@ -1,0 +1,32 @@
+{
+  "$schema": "../schema/ai-web-test.config.schema.json",
+  "project": { "name": "sample-shop" },
+  "target": {
+    "rootDir": "../fixtures/sample-app",
+    "baseUrl": "http://127.0.0.1:4178",
+    "startCommand": "npm start"
+  },
+  "artifacts": {
+    "directory": "../.ai-web-test/sample-shop"
+  },
+  "source": {
+    "include": ["src", "server.mjs"],
+    "exclude": ["node_modules", "dist", ".git"],
+    "maxFiles": 5000,
+    "maxFileSizeBytes": 524288
+  },
+  "runtime": {
+    "enabled": true,
+    "headless": true,
+    "profiles": [
+      { "id": "desktop-chromium", "browser": "chromium", "viewport": { "width": 1280, "height": 800 } }
+    ]
+  },
+  "policy": {
+    "maxRisk": "read",
+    "allowedHosts": ["127.0.0.1"],
+    "allowExternalOrigins": false,
+    "confirmationRequired": true,
+    "destructiveActionAllowlist": []
+  }
+}

@@ -1,0 +1,7 @@
+fixtures/
+tests/
+examples/
+.github/
+coverage/
+dist/**/*.map
+*.check.*

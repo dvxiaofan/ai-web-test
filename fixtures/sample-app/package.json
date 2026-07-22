@@ -1,0 +1,8 @@
+{
+  "name": "ai-web-test-sample-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs"
+  }
+}
