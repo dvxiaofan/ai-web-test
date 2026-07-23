@@ -1,7 +1,10 @@
 # Implementation plan
 
-Implementation status as of 2026-07-23: milestones 1–5 are implemented in the
-repository. Browser end-to-end execution is covered by an opt-in fixture test
+Implementation status as of 2026-07-23: milestones 1–3 form a usable alpha for
+controlled discovery and declarative smoke tests. Milestones 4–5 have working
+building blocks, but AI-to-executable-scenario import, authentication setup,
+test-data lifecycle, reproducible packaging, and release-grade browser CI still
+require work. Browser end-to-end execution is covered by an opt-in fixture test
 (`AI_WEB_TEST_E2E=1`); environments that forbid local listeners should run the
 unit/integration suite and execute the fixture in CI.
 
@@ -29,21 +32,25 @@ unit/integration suite and execute the fixture in CI.
 - Full/module/route/scenario/tag/role selectors.
 - Interactive approval gate and immutable approved plans.
 
-## Milestone 4: AI assistance ✅
+## Milestone 4: AI assistance 🧪
 
 - Provider-neutral schema-constrained adapter.
-- Scenario proposal from inventory and selected source summaries.
+- Advisory scenario proposal from inventory and bounded, opt-in source excerpts.
 - Semantic screenshot review integration point.
 - Failure classification and actionable triage.
 - Machine-readable agent protocol and example assistant instructions.
 
-## Milestone 5: quality and distribution ✅
+## Milestone 5: quality and distribution 🚧
 
 - Unit, integration, and end-to-end fixtures.
-- Self-test against the included sample application.
+- Opt-in self-test against the included sample application.
 - HTML/JSON reports and CI summary.
 - CI templates, Docker guidance, and package publishing metadata.
 - Full quick-start, configuration, adapter, agent, and troubleshooting docs.
+
+Remaining release gates include a committed package lock, mandatory browser E2E
+in CI, authentication/data fixtures, AI proposal review/import, and documented
+cleanup/rollback contracts for mutating scenarios.
 
 ## Acceptance gates
 

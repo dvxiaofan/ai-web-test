@@ -58,7 +58,7 @@ export async function compareOrCreateVisualSnapshot(
 }
 
 function digest(value: Buffer): string {
-  return createHash('sha256').update(value).digest('hex');
+  return createHash('sha256').update(new Uint8Array(value)).digest('hex');
 }
 
 function sanitize(value: string): string {

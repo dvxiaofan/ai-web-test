@@ -21,7 +21,8 @@ export interface UrlAccessDecision {
     | "external-host"
     | "unsupported-protocol"
     | "credentials-in-url"
-    | "invalid-url";
+    | "invalid-url"
+    | "request-method-blocked";
   url?: string;
   origin?: string;
 }

@@ -104,9 +104,12 @@ canonical fields shown above.
 
 ## Roles and authentication
 
-The safest option is to create Playwright storage state in a dedicated test
-environment and reference its path. Username and password values must be
-provided through environment-variable names, for example:
+The currently supported option is to create Playwright storage state in a
+dedicated test environment and reference its path. `usernameEnv`,
+`passwordEnv`, and `setupScenarioId` are reserved configuration fields; the
+alpha runner does not yet generate login state from them automatically. If you
+record these fields for a future adapter, only environment-variable names are
+valid, for example:
 
 ```json
 {
@@ -117,12 +120,20 @@ provided through environment-variable names, for example:
 ```
 
 The values themselves are never valid configuration literals and are redacted
-from AI prompts and reports.
+from AI prompts and reports. Until an authentication adapter is implemented,
+provide `storageStatePath` for every non-anonymous role used by a plan.
+
+`ai.sendSource` is opt-in. When enabled, the AI plan request receives bounded,
+line-oriented excerpts from files already referenced by the inventory; the
+provider still applies secret redaction and the `maxContextChars` limit. Keep it
+disabled for repositories containing proprietary or sensitive source unless the
+provider and retention policy have been reviewed.
 
 ## Target startup
 
-When `startCommand` is present, `discover` and `run` first probe `baseUrl`; if it
-is not reachable, they start the command, wait for the URL, capture its output,
-and terminate the child after the operation. Use `--no-start` when the host
-process is managed externally. The command is treated as trusted operator
-configuration and should point only to an isolated test environment.
+When `startCommand` is present, pass `--start` to `discover` or `run` to opt in to
+starting it. The command is then probed, waited on, logged, and terminated after
+the operation. Without `--start`, the tool never launches a configured command;
+use this mode when the host process is managed externally. The command is
+treated as trusted operator configuration and should point only to an isolated
+test environment.

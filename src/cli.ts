@@ -16,6 +16,7 @@ import {
   type Inventory,
   type ProjectConfig,
   type RunPlan,
+  type RunResult,
   type RunScope,
   type TestScenario,
 } from './core/index.js';
@@ -27,11 +28,16 @@ import { generateRouteSmokeScenarios, loadScenarios, writeScenarios } from './sc
 import { executePlan } from './execution/index.js';
 import { writeHtmlReport, type HtmlReportModel } from './reporting/index.js';
 import { getBooleanOption, getListOption, getStringOption, parseCliArgs, CliOutput, withPrompt } from './cli/index.js';
-import { createAiProvider, proposeScenariosWithAi, triageFailureWithAi } from './ai/index.js';
+import { collectSourceExcerpts, createAiProvider, proposeScenariosWithAi, triageFailureWithAi } from './ai/index.js';
 import { withTargetProcess } from './runtime/index.js';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_CONFIG_NAME = 'ai-web-test.config.json';
+
+/** Map a completed run to the process status expected by CI and shell users. */
+export function runResultExitCode(status: RunResult['status']): number {
+  return status === 'passed' ? 0 : 1;
+}
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
   const args = parseCliArgs(argv);
@@ -119,7 +125,16 @@ async function commandInit(args: ReturnType<typeof parseCliArgs>, output: CliOut
     ai: { enabled: false, sendSource: false, sendScreenshots: false },
   };
   await writeJsonFile(configPath, config);
-  output.result({ ok: true, configPath, targetRoot, next: [`aitest discover --config ${path.relative(cwd, configPath)}`] });
+  const relativeConfig = path.relative(cwd, configPath);
+  output.result({
+    ok: true,
+    configPath,
+    targetRoot,
+    next: [
+      `aitest discover --config ${relativeConfig} --static-only`,
+      `aitest discover --config ${relativeConfig} --start`,
+    ],
+  });
 }
 
 async function commandDiscover(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
@@ -146,7 +161,7 @@ async function commandDiscover(args: ReturnType<typeof parseCliArgs>, output: Cl
       workingDirectory: config.target.workingDirectory,
       environment: config.target.env,
       outputDir: store.layout.root,
-      noStart: !getBooleanOption(args, 'start', true),
+      noStart: !getBooleanOption(args, 'start', false),
     }, async (target) => {
       if (target.started) output.info(`Started target with ${target.command}; logs: ${target.logPath}`);
       const profile = config.runtime.profiles[0];
@@ -163,14 +178,15 @@ async function commandDiscover(args: ReturnType<typeof parseCliArgs>, output: Cl
         ignoreHTTPSErrors: config.runtime.ignoreHTTPSErrors,
         maxPages: config.runtime.maxPages,
         screenshotDir,
-        captureScreenshots: getBooleanOption(args, 'screenshots', true),
+        captureScreenshots: config.policy.allowSecretPersistence && getBooleanOption(args, 'screenshots', false),
+        redactQueryKeys: [...config.policy.redactFields, ...config.policy.redactHeaders],
       });
       runtimeStatus = exploration.status;
       inventory = mergeBrowserExploration(inventory, exploration);
       if (exploration.unavailableReason) output.warn(exploration.unavailableReason);
     });
   }
-  const generatedScenarios = generateRouteSmokeScenarios(inventory);
+  const generatedScenarios = generateRouteSmokeScenarios(inventory, { screenshot: config.policy.allowSecretPersistence });
   const existingScenarios = await loadExistingScenarios(store);
   const scenarios = mergeScenarioCatalog(existingScenarios, generatedScenarios);
   inventory = addScenarioCoverage(inventory, scenarios);
@@ -185,7 +201,7 @@ async function commandPlan(args: ReturnType<typeof parseCliArgs>, output: CliOut
   const config = await readConfig(args);
   const store = new ArtifactStore(config.artifacts.directory);
   const inventory = await store.readInventory();
-  const scenarios = await readScenarioCatalog(store, inventory);
+  const scenarios = await readScenarioCatalog(store, inventory, config.policy.allowSecretPersistence);
   const presetName = getStringOption(args, 'preset');
   const preset = presetName ? config.presets[presetName] : undefined;
   if (presetName && !preset) throw new Error(`Unknown configured preset: ${presetName}`);
@@ -194,7 +210,7 @@ async function commandPlan(args: ReturnType<typeof parseCliArgs>, output: CliOut
   const requestedRoles = getListOption(args, 'role').length > 0 ? getListOption(args, 'role') : preset?.roles ?? [];
   const roles = resolveRoleSelectors(requestedRoles, inventory);
   const changedPaths = scope.mode === 'affected' && (scope.changedPaths?.length ?? 0) === 0
-    ? await gitChangedPaths(config.target.rootDir)
+    ? await gitChangedPaths(config.target.rootDir, getStringOption(args, 'base-ref'))
     : scope.changedPaths;
   const effectiveScope: RunScope = changedPaths === undefined ? scope : { ...scope, changedPaths };
   const failedScenarioIds = effectiveScope.mode === 'failed' && effectiveScope.failedRunId
@@ -248,11 +264,14 @@ async function commandAiPlan(args: ReturnType<typeof parseCliArgs>, output: CliO
   const config = await readConfig(args);
   const store = new ArtifactStore(config.artifacts.directory);
   const inventory = await store.readInventory();
-  const scenarios = await readScenarioCatalog(store, inventory);
+  const scenarios = await readScenarioCatalog(store, inventory, config.policy.allowSecretPersistence);
   const provider = createAiProvider(config.ai);
   if (provider.name === 'disabled') {
     throw new Error('AI assistance is disabled. Set ai.enabled=true, ai.provider, and ai.model in the config.');
   }
+  const sourceExcerpts = config.ai.sendSource
+    ? await collectSourceExcerpts(inventory, config.target.rootDir, { maxChars: Math.min(config.ai.maxContextChars, 20_000) })
+    : undefined;
   const response = await proposeScenariosWithAi(provider, {
     project: inventory.project.name,
     modules: inventory.nodes.filter((node) => node.kind === 'module').map((node) => ({ id: node.id, name: node.name })),
@@ -267,6 +286,10 @@ async function commandAiPlan(args: ReturnType<typeof parseCliArgs>, output: CliO
     })),
     existingScenarios: scenarios.map((scenario) => ({ id: scenario.id, name: scenario.name })),
     gaps: inventory.findings.filter((finding) => finding.category === 'coverage-gap').map((finding) => finding.summary),
+    ...(sourceExcerpts === undefined ? {} : { sourceExcerpts }),
+  }, {
+    maxContextChars: config.ai.maxContextChars,
+    additionalSecretKeys: [...config.policy.redactFields, ...config.policy.redactHeaders],
   });
   const outputPath = await store.writeJson(`ai-plans/${new Date().toISOString().replace(/[:.]/g, '-')}.json`, {
     generatedAt: new Date().toISOString(),
@@ -281,7 +304,7 @@ async function commandApprove(args: ReturnType<typeof parseCliArgs>, output: Cli
   const config = await readConfig(args);
   const store = new ArtifactStore(config.artifacts.directory);
   const inventory = await store.readInventory();
-  const scenarios = await readScenarioCatalog(store, inventory);
+  const scenarios = await readScenarioCatalog(store, inventory, config.policy.allowSecretPersistence);
   const planId = getStringOption(args, 'plan') ?? await latestPlanId(store);
   if (!planId) throw new Error('No proposed plan found. Run `aitest plan` first.');
   const proposed = await store.readPlan(planId, 'proposed');
@@ -312,20 +335,25 @@ async function commandRun(args: ReturnType<typeof parseCliArgs>, output: CliOutp
   const store = new ArtifactStore(config.artifacts.directory);
   await store.initialize();
   const inventory = await store.readInventory();
-  const scenarios = await readScenarioCatalog(store, inventory);
+  const scenarios = await readScenarioCatalog(store, inventory, config.policy.allowSecretPersistence);
   const planId = getStringOption(args, 'plan') ?? await latestApprovedPlanId(store);
   if (!planId) throw new Error('No approved plan found. Run `aitest plan` followed by `aitest approve`.');
   const plan = await store.readPlan(planId, 'approved');
   const validation = validateApprovedPlan(plan, { inventory, scenarios });
   if (!validation.valid) throw new Error(`Approved plan is no longer valid:\n${validation.issues.map((issue) => `- ${issue.message}`).join('\n')}`);
   const storageStateByRole = buildStorageStateMap(config, inventory);
+  const captureTrace = config.policy.allowSecretPersistence && getBooleanOption(args, 'trace', false);
+  const captureScreenshots = config.policy.allowSecretPersistence && getBooleanOption(args, 'screenshots', false);
+  if (!config.policy.allowSecretPersistence && (getBooleanOption(args, 'trace') || getBooleanOption(args, 'screenshots'))) {
+    output.warn('Trace/screenshot persistence was requested but policy.allowSecretPersistence is false; sensitive artifacts will not be written.');
+  }
   const result = await withTargetProcess({
     baseUrl: config.target.baseUrl ?? plan.target.baseUrl,
     ...(config.target.startCommand ? { startCommand: config.target.startCommand } : {}),
     workingDirectory: config.target.workingDirectory,
     environment: config.target.env,
     outputDir: store.layout.root,
-    noStart: !getBooleanOption(args, 'start', true),
+    noStart: !getBooleanOption(args, 'start', false),
   }, async (target) => {
     if (target.started) output.info(`Started target with ${target.command}; logs: ${target.logPath}`);
     return executePlan(plan, {
@@ -333,8 +361,8 @@ async function commandRun(args: ReturnType<typeof parseCliArgs>, output: CliOutp
       inventory,
       outputDir: store.layout.runs,
       storageStateByRole,
-      captureTrace: getBooleanOption(args, 'trace', true),
-      captureScreenshotsOnFailure: getBooleanOption(args, 'screenshots', true),
+      captureTrace,
+      captureScreenshotsOnFailure: captureScreenshots,
       visualBaselineDir: store.resolve('visual-baselines'),
       updateVisualBaselines: getBooleanOption(args, 'update-baselines'),
       failOnVisualDiff: !getBooleanOption(args, 'allow-visual-diff'),
@@ -350,6 +378,7 @@ async function commandRun(args: ReturnType<typeof parseCliArgs>, output: CliOutp
   const reportPath = store.runWorkspace(result.id).report;
   await writeHtmlReport(reportModel, reportPath);
   output.result({ ok: result.status === 'passed', status: result.status, runId: result.id, resultPath, reportPath, coverage: result.coverage });
+  if (runResultExitCode(result.status) !== 0) process.exitCode = runResultExitCode(result.status);
 }
 
 async function commandReport(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
@@ -359,7 +388,7 @@ async function commandReport(args: ReturnType<typeof parseCliArgs>, output: CliO
   if (!runId) throw new Error('Specify a run id with --run.');
   const result = await store.readRunResult(runId);
   const plan = await store.readPlan(result.planId, 'approved');
-  const model = reportModelFromRun(result, plan, await readScenarioCatalog(store, await store.readInventory()));
+  const model = reportModelFromRun(result, plan, await readScenarioCatalog(store, await store.readInventory(), config.policy.allowSecretPersistence));
   const target = getStringOption(args, 'output') ?? store.runWorkspace(runId).report;
   await writeHtmlReport(model, target);
   output.result({ ok: true, reportPath: target, runId });
@@ -382,12 +411,18 @@ async function commandAnalyze(args: ReturnType<typeof parseCliArgs>, output: Cli
       testId: scenario.scenarioId,
       title: scenario.scenarioId,
       error: scenario.error?.message ?? 'Scenario failed without a top-level error.',
-      consoleErrors: [],
-      failedRequests: [],
+      consoleErrors: [
+        ...metadataStringArray(scenario.metadata?.consoleErrors),
+        ...metadataStringArray(scenario.metadata?.pageErrors).map((message) => `pageerror: ${message}`),
+      ],
+      failedRequests: metadataFailedRequests(scenario.metadata?.failedRequests),
       screenshotDescriptions: screenshotPaths,
       screenshotPaths,
     };
-    const analysis = await triageFailureWithAi(provider, evidence);
+    const analysis = await triageFailureWithAi(provider, evidence, {
+      maxContextChars: config.ai.maxContextChars,
+      additionalSecretKeys: [...config.policy.redactFields, ...config.policy.redactHeaders],
+    });
     triage.push({ scenarioId: scenario.scenarioId, analysis });
   }
   const outputPath = await store.writeJson(`runs/${runId}/ai-triage.json`, { runId, generatedAt: new Date().toISOString(), triage });
@@ -398,7 +433,7 @@ async function commandStatus(args: ReturnType<typeof parseCliArgs>, output: CliO
   const config = await readConfig(args);
   const store = new ArtifactStore(config.artifacts.directory);
   const inventory = await store.readInventory();
-  const scenarios = await readScenarioCatalog(store, inventory);
+  const scenarios = await readScenarioCatalog(store, inventory, config.policy.allowSecretPersistence);
   output.result({ ok: true, inventory: summarizeInventory(inventory, scenarios), artifacts: store.layout });
 }
 
@@ -407,10 +442,10 @@ async function readConfig(args: ReturnType<typeof parseCliArgs>): Promise<Projec
   return loadConfig(configPath);
 }
 
-async function readScenarioCatalog(store: ArtifactStore, inventory: Inventory): Promise<TestScenario[]> {
+async function readScenarioCatalog(store: ArtifactStore, inventory: Inventory, allowSecretPersistence = false): Promise<TestScenario[]> {
   const scenarioPath = store.resolve('scenarios.json');
   if (await store.exists('scenarios.json')) return loadScenarios(scenarioPath);
-  const scenarios = generateRouteSmokeScenarios(inventory);
+  const scenarios = generateRouteSmokeScenarios(inventory, { screenshot: allowSecretPersistence });
   await writeScenarios(scenarioPath, scenarios);
   return scenarios;
 }
@@ -448,7 +483,7 @@ async function chooseScope(args: ReturnType<typeof parseCliArgs>, inventory: Inv
       const selected = await prompt.multiSelect('Select scenarios:', scenarios.map((scenario) => ({ value: scenario.id, label: scenario.name, description: `${scenario.risk} · ${scenario.tags.join(', ')}` })));
       return { mode, scenarioIds: selected, includeDependencies };
     }
-    if (mode === 'affected') return { mode, changedPaths: await gitChangedPaths(inventory.project.rootDir), includeDependencies };
+    if (mode === 'affected') return { mode, changedPaths: await gitChangedPaths(inventory.project.rootDir, getStringOption(args, 'base-ref')), includeDependencies };
     return { mode, includeDependencies };
   });
 }
@@ -636,13 +671,47 @@ async function latestPlanByPrefix(store: ArtifactStore, prefix: string): Promise
   return latest?.slice(prefix.length, -'.json'.length);
 }
 
-async function gitChangedPaths(rootDir: string): Promise<string[]> {
+async function gitChangedPaths(rootDir: string, explicitBaseRef?: string): Promise<string[]> {
   try {
-    const result = await execFileAsync('git', ['-C', rootDir, 'diff', '--name-only', 'HEAD'], { maxBuffer: 2 * 1024 * 1024 });
-    return result.stdout.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+    const baseRef = explicitBaseRef
+      ?? process.env.AI_WEB_TEST_BASE_REF
+      ?? process.env.CI_MERGE_REQUEST_DIFF_BASE_SHA
+      ?? (process.env.GITHUB_BASE_REF ? `origin/${process.env.GITHUB_BASE_REF}` : undefined);
+    const commands = baseRef
+      ? [['diff', '--name-only', `${baseRef}...HEAD`]]
+      : [
+          ['diff', '--name-only', 'HEAD'],
+          ['diff', '--cached', '--name-only'],
+          ['ls-files', '--others', '--exclude-standard'],
+        ];
+    const changed = new Set<string>();
+    for (const command of commands) {
+      const result = await execFileAsync('git', ['-C', rootDir, ...command], { maxBuffer: 2 * 1024 * 1024 });
+      for (const item of result.stdout.split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean)) changed.add(item);
+    }
+    return [...changed].sort();
   } catch {
     return [];
   }
+}
+
+function metadataStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function metadataFailedRequests(value: unknown): Array<{ method: string; url: string; status?: number; error?: string }> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    if (typeof record.method !== 'string' || typeof record.url !== 'string') return [];
+    return [{
+      method: record.method,
+      url: record.url,
+      ...(typeof record.status === 'number' ? { status: record.status } : {}),
+      ...(typeof record.error === 'string' ? { error: record.error } : {}),
+    }];
+  });
 }
 
 function helpText(): string {
@@ -667,8 +736,10 @@ Common options:
   --scenario <id>                     Scenario selector
   --browser <profile-id>              Browser profile selector
   --preset <name>                     Use a named non-interactive config preset
+  --base-ref <git-ref>                Compare affected scope with this Git base
   --update-baselines                  Explicitly accept current visual snapshots
-  --no-start                          Do not start target.startCommand
+  --start                             Explicitly run trusted target.startCommand
+  --no-start                          Keep target startup disabled (the default)
 
 Examples:
   aitest init ../my-app

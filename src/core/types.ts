@@ -454,7 +454,11 @@ export interface PlanApproval {
   approvedAt: IsoDateTime;
   approvedBy: string;
   inventoryDigest: string;
+  /** Semantic digest of the exact scenario definitions selected by the plan. */
+  scenarioDigest: string;
   policyDigest: string;
+  /** Digest of the complete immutable plan content at approval time. */
+  planDigest: string;
   note?: string;
 }
 
@@ -466,6 +470,8 @@ export interface RunPlan {
   projectId: string;
   inventoryId: string;
   inventoryDigest: string;
+  /** Digest of the selected scenario definitions, including auto-included ones. */
+  scenarioDigest: string;
   scope: RunScope;
   scenarioIds: string[];
   autoIncludedScenarioIds: string[];

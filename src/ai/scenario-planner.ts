@@ -8,6 +8,8 @@ export interface AiInventorySummary {
   pages?: Array<{ id: string; name: string; routes: string[]; controls?: unknown; links?: unknown }>;
   existingScenarios?: Array<{ id: string; name: string }>;
   gaps?: string[];
+  /** Optional, explicitly requested source excerpts (never included by default). */
+  sourceExcerpts?: Array<{ filePath: string; line?: number; content: string }>;
 }
 
 export interface AiScenarioProposal {
@@ -38,6 +40,7 @@ export interface AiScenarioPlanResponse {
 export async function proposeScenariosWithAi(
   provider: AiProvider,
   inventory: AiInventorySummary,
+  options: { maxContextChars?: number; additionalSecretKeys?: string[] } = {},
 ): Promise<AiScenarioPlanResponse> {
   const response = await provider.generateJson<AiScenarioPlanResponse>({
     task: 'Propose auditable browser test scenarios for the discovered application inventory.',
@@ -51,6 +54,8 @@ export async function proposeScenariosWithAi(
     schemaDescription:
       '{ scenarios: AiScenarioProposal[], coverageGaps: string[], questionsForOperator: string[] }',
     input: inventory,
+    ...(options.maxContextChars === undefined ? {} : { maxContextChars: options.maxContextChars }),
+    ...(options.additionalSecretKeys === undefined ? {} : { additionalSecretKeys: options.additionalSecretKeys }),
   });
 
   return validateScenarioPlan(response.value, inventory);

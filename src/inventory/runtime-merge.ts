@@ -8,7 +8,7 @@ import {
   type PageInventoryNode,
   type RouteInventoryNode,
 } from '../core/index.js';
-import type { BrowserExplorationResult, BrowserPageObservation, NetworkObservation } from '../browser/index.js';
+import type { BrowserExplorationResult, BrowserPageObservation, NetworkObservation, SkippedBrowserTarget } from '../browser/index.js';
 
 export function mergeBrowserExploration(
   sourceInventory: Inventory,
@@ -24,6 +24,7 @@ export function mergeBrowserExploration(
     for (const network of page.network) upsertRuntimeApi(nodes, sourceInventory, route, network, now);
     findings.push(...runtimeFindings(sourceInventory.id, route, page, now));
   }
+  findings.push(...skippedTargetFindings(sourceInventory, exploration.skipped, now));
 
   const dedupedFindings = dedupeBy(findings, (finding) => finding.id);
   const routes = nodes.filter((node): node is RouteInventoryNode => node.kind === 'route');
@@ -60,8 +61,56 @@ export function mergeBrowserExploration(
       browserExplorationStatus: exploration.status,
       browserExplorationWarnings: exploration.warnings,
       browserPagesObserved: exploration.pages.length,
+      browserSkippedTargets: exploration.skipped.map((target) => ({
+        url: target.url,
+        reason: target.reason,
+        ...(target.detail === undefined ? {} : { detail: target.detail }),
+      })),
     },
   };
+}
+
+function skippedTargetFindings(
+  inventory: Inventory,
+  skipped: readonly SkippedBrowserTarget[],
+  now: string,
+): Finding[] {
+  const routes = inventory.nodes.filter((node): node is RouteInventoryNode => node.kind === 'route');
+  return skipped.filter((target) => target.reason !== 'duplicate').map((target) => {
+    const parsed = safeUrl(target.url, inventory.runtimeBaseUrl ?? inventory.project.baseUrl);
+    const route = parsed === undefined
+      ? undefined
+      : routes.find((candidate) => pathsMatch(candidate.path, parsed.pathname));
+    const reason = target.detail ? `${target.reason}: ${target.detail}` : target.reason;
+    const id = stableId('finding', `${inventory.id}:coverage-gap:${target.url}:${target.reason}`);
+    const evidence: EvidenceRef = {
+      id: stableId('evidence', `${id}:${target.url}`),
+      kind: 'runtime',
+      summary: `Browser exploration did not cover ${target.url}`,
+      confidence: 1,
+      observedAt: now,
+      uri: target.url,
+      metadata: {
+        reason: target.reason,
+        ...(target.detail === undefined ? {} : { detail: target.detail }),
+        ...(target.risk === undefined ? {} : { risk: target.risk }),
+      },
+    };
+    return {
+      id,
+      category: 'coverage-gap',
+      classification: 'coverage-gap',
+      severity: target.reason === 'page-limit' || target.reason === 'dynamic-route' ? 'medium' : 'low',
+      status: 'open',
+      confidence: 1,
+      title: `Browser coverage skipped: ${target.url}`,
+      summary: reason,
+      evidence: [evidence],
+      relatedIds: route ? [route.id] : [],
+      createdAt: now,
+      fingerprint: id,
+    } satisfies Finding;
+  });
 }
 
 function upsertRuntimeRoute(

@@ -41,4 +41,23 @@ describe('runtime inventory merge', () => {
     expect(merged.coverage.apis.observed).toBe(1);
     expect(merged.findings.some((finding) => finding.category === 'visual')).toBe(true);
   });
+
+  it('keeps skipped browser targets visible as coverage gaps', () => {
+    const merged = mergeBrowserExploration(inventory, {
+      status: 'partial',
+      baseUrl: 'http://app.test',
+      browserName: 'chromium',
+      startedAt: '2026-01-01T00:00:01.000Z',
+      endedAt: '2026-01-01T00:00:02.000Z',
+      warnings: ['page limit reached'],
+      pages: [],
+      skipped: [{ url: 'http://app.test/products', reason: 'page-limit', detail: 'maxPages=0' }],
+    });
+    const gap = merged.findings.find((finding) => finding.category === 'coverage-gap');
+    expect(gap).toMatchObject({ classification: 'coverage-gap', relatedIds: ['route-products'] });
+    expect(merged.coverage.unresolved).toBe(1);
+    expect(merged.metadata?.browserSkippedTargets).toEqual([
+      { url: 'http://app.test/products', reason: 'page-limit', detail: 'maxPages=0' },
+    ]);
+  });
 });

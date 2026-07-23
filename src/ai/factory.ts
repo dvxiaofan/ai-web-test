@@ -10,6 +10,7 @@ export function createAiProvider(config: AiConfig): AiProvider {
       return new OpenAiResponsesProvider({
         model: config.model,
         ...(config.apiKeyEnv ? { apiKeyEnv: config.apiKeyEnv } : {}),
+        maxContextChars: config.maxContextChars,
       });
     default:
       throw new Error(`Unsupported AI provider: ${config.provider ?? '(missing)'}.`);

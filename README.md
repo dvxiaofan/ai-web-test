@@ -7,6 +7,10 @@ web applications. It combines source-code discovery, browser exploration,
 explicit operator approval, deterministic Playwright execution, visual evidence,
 and AI-assisted planning and failure analysis.
 
+> Alpha notice: this release is intended for controlled local or isolated test
+> environments. Read [release readiness and operating boundaries](docs/READINESS.md)
+> before enabling authentication or state-changing scenarios.
+
 The project follows one safety rule above all others:
 
 > Discover first, approve a test plan second, execute state-changing tests last.
@@ -39,8 +43,9 @@ npm run build
 # Create a config for an existing project
 npm run aitest -- init ../my-web-app
 
-# First run: source inventory + safe, observation-only browser discovery
-npm run aitest -- discover --config ai-web-test.config.json
+# First run: source inventory + safe, observation-only browser discovery.
+# Add --start only when you explicitly authorize the configured start command.
+npm run aitest -- discover --config ai-web-test.config.json --start
 
 # Generate a plan. With a terminal and no --scope this asks the operator
 # whether to run smoke, a module, selected scenarios, affected coverage, or all.
@@ -107,8 +112,9 @@ enabled for scenario proposals and failure triage:
 }
 ```
 
-Source and screenshot sharing are opt-in. Provider responses are validated and
-cannot increase the approved action risk or host allowlist.
+Source and screenshot sharing are opt-in. Source prompts are bounded and use
+inventory-referenced excerpts; provider responses are validated and cannot
+increase the approved action risk or host allowlist.
 
 ```bash
 npm run aitest -- ai-plan --config ai-web-test.config.json
@@ -134,7 +140,7 @@ inspect source + observe runtime
      evidence + coverage report
 ```
 
-See [Product requirements](docs/PRODUCT.md),
+See [release readiness](docs/READINESS.md), [Product requirements](docs/PRODUCT.md),
 [Architecture](docs/ARCHITECTURE.md), and
 [Implementation plan](docs/IMPLEMENTATION_PLAN.md). Additional references:
 [configuration](docs/CONFIGURATION.md), [scenario authoring](docs/SCENARIOS.md),

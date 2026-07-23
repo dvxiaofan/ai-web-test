@@ -638,6 +638,8 @@ function accessReasonToSkipReason(decision: UrlAccessDecision): SkippedBrowserTa
       return "unsupported-protocol";
     case "invalid-url":
       return "invalid-url";
+    case "request-method-blocked":
+      return "risky-navigation";
     case "allowed-base-origin":
     case "allowed-host":
       return "invalid-url";

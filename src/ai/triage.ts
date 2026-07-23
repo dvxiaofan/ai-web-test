@@ -2,6 +2,9 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { AiProvider } from './provider.js';
 
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+const MAX_TOTAL_IMAGE_BYTES = 8 * 1024 * 1024;
+
 export interface FailureEvidence {
   testId: string;
   title: string;
@@ -25,6 +28,7 @@ export interface FailureTriage {
 export async function triageFailureWithAi(
   provider: AiProvider,
   evidence: FailureEvidence,
+  options: { maxContextChars?: number; additionalSecretKeys?: string[] } = {},
 ): Promise<FailureTriage> {
   const images = await loadEvidenceImages(evidence.screenshotPaths ?? []);
   const response = await provider.generateJson<FailureTriage>({
@@ -38,6 +42,8 @@ export async function triageFailureWithAi(
     schemaDescription:
       '{ classification, confidence: number 0..1, summary, evidence: string[], suggestedNextSteps: string[], requiresHumanReview: boolean }',
     input: evidence,
+    ...(options.maxContextChars === undefined ? {} : { maxContextChars: options.maxContextChars }),
+    ...(options.additionalSecretKeys === undefined ? {} : { additionalSecretKeys: options.additionalSecretKeys }),
     ...(images.length > 0 ? { images } : {}),
   });
 
@@ -52,9 +58,12 @@ export async function triageFailureWithAi(
 
 async function loadEvidenceImages(paths: string[]): Promise<Array<{ mimeType: string; dataBase64: string; description?: string }>> {
   const images: Array<{ mimeType: string; dataBase64: string; description?: string }> = [];
+  let totalBytes = 0;
   for (const imagePath of paths.slice(0, 4)) {
     try {
       const data = await readFile(imagePath);
+      if (data.byteLength > MAX_IMAGE_BYTES || totalBytes + data.byteLength > MAX_TOTAL_IMAGE_BYTES) continue;
+      totalBytes += data.byteLength;
       const extension = path.extname(imagePath).toLowerCase();
       const mimeType = extension === '.jpg' || extension === '.jpeg' ? 'image/jpeg' : extension === '.webp' ? 'image/webp' : 'image/png';
       images.push({ mimeType, dataBase64: data.toString('base64'), description: path.basename(imagePath) });

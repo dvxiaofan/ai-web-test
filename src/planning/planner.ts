@@ -1,6 +1,6 @@
-import { contentDigest, stableId } from "../core/ids.js";
+import { stableId } from "../core/ids.js";
 import type { BrowserProfile, RunPlan, TestScenario } from "../core/types.js";
-import { validatePlan } from "./approval.js";
+import { computeInventoryDigest, computePlanDigest, computeScenarioDigest, validatePlan } from "./approval.js";
 import { selectScenarios } from "./selectors.js";
 import type { ProposedPlanResult, ProposePlanInput } from "./types.js";
 
@@ -18,7 +18,8 @@ export function proposePlan(input: ProposePlanInput): ProposedPlanResult {
     status: "proposed",
     projectId: input.inventory.project.id,
     inventoryId: input.inventory.id,
-    inventoryDigest: contentDigest(input.inventory),
+    inventoryDigest: computeInventoryDigest(input.inventory),
+    scenarioDigest: computeScenarioDigest(input.scenarios, selection.selectedScenarioIds),
     scope: cloneScope(input.scope),
     scenarioIds: [...selection.selectedScenarioIds],
     autoIncludedScenarioIds: [...selection.autoIncludedScenarioIds],
@@ -33,35 +34,13 @@ export function proposePlan(input: ProposePlanInput): ProposedPlanResult {
     digest: "pending",
   };
   const plan: RunPlan = { ...planWithoutDigest, digest: "" };
-  plan.digest = computePlanDigestWithoutCircular(plan);
+  plan.digest = computePlanDigest(plan);
   const validation = validatePlan(plan, { inventory: input.inventory, scenarios: input.scenarios, selection });
   return { plan, selection, validation };
 }
 
 /** Alias kept intentionally descriptive for CLI and AI-agent callers. */
 export const createProposedPlan = proposePlan;
-
-function computePlanDigestWithoutCircular(plan: RunPlan): string {
-  return contentDigest({
-    schemaVersion: plan.schemaVersion,
-    id: plan.id,
-    name: plan.name,
-    projectId: plan.projectId,
-    inventoryId: plan.inventoryId,
-    inventoryDigest: plan.inventoryDigest,
-    scope: plan.scope,
-    scenarioIds: plan.scenarioIds,
-    autoIncludedScenarioIds: plan.autoIncludedScenarioIds,
-    roles: plan.roles,
-    browserProfiles: plan.browserProfiles,
-    level: plan.level,
-    target: plan.target,
-    policy: plan.policy,
-    ...(plan.createdBy === undefined ? {} : { createdBy: plan.createdBy }),
-    ...(plan.notes === undefined ? {} : { notes: plan.notes }),
-    ...(plan.metadata === undefined ? {} : { metadata: plan.metadata }),
-  });
-}
 
 function inferRoles(scenarios: readonly TestScenario[], selectedIds: readonly string[]): string[] {
   const selected = new Set(selectedIds);

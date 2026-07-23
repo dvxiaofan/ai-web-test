@@ -4,6 +4,9 @@ AI Web Test 是一套面向已有 Web 项目的可复用自动化测试工具。
 源码与真实浏览器页面，建立页面、路由、接口、角色和业务场景清单，然后先
 生成计划、等待操作者确认，最后才执行测试。
 
+> 当前版本是 alpha/MVP：适合受控的本地或隔离测试环境，不应直接连接生产、
+> 真实支付或共享用户数据。使用前请阅读[实际可用范围与限制](READINESS.md)。
+
 ## 核心原则
 
 ```text
@@ -26,7 +29,7 @@ npm run aitest -- init ../目标项目目录 \
   --url http://127.0.0.1:3000 \
   --start "npm run dev"
 
-npm run aitest -- discover
+npm run aitest -- discover --start
 npm run aitest -- plan
 npm run aitest -- approve --plan <计划ID>
 npm run aitest -- run --plan <计划ID>
@@ -57,7 +60,7 @@ npm run aitest -- plan --scope module --module user-center
 - 请求响应、失败接口、Console 和页面异常；
 - 横向溢出、文字裁切、控件过小和控件离开视口；
 - 图片替代文本、表单标签、控件可访问名称和重复ID等基础无障碍检查；
-- 截图、Trace 和失败证据；
+- 经策略显式允许后保存截图、Trace 和失败证据；
 - 显式更新的视觉截图基线；
 - 可选 AI 场景建议和失败归因。
 
@@ -68,6 +71,7 @@ npm run aitest -- plan --scope module --module user-center
 - 删除、支付、退款、发送、发布属于 `destructive`；
 - 破坏性动作必须同时满足风险等级、动作白名单和测试数据策略；
 - 域名白名单外的请求默认阻断；
+- WebSocket 当前默认 fail-closed，后续需专门的消息级风险策略；
 - 账号和密钥只能引用环境变量；
 - AI不能提高已经审批的风险等级。
 

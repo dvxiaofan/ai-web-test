@@ -4,6 +4,7 @@ const TOKEN_PATTERNS: RegExp[] = [
   /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi,
   /\bsk-[A-Za-z0-9_-]{12,}\b/g,
   /\b(?:eyJ[A-Za-z0-9_-]+\.){2}[A-Za-z0-9_-]+\b/g,
+  /\b(password|passwd|token|secret|api[-_]?key|access[-_]?token|refresh[-_]?token)\s*[:=]\s*(['"]?)[^\s,'";}]+\2/gi,
 ];
 
 export function redactText(text: string): string {
@@ -34,4 +35,37 @@ export function redactSecrets(value: unknown, additionalSecretKeys: string[] = [
   };
 
   return visit(value);
+}
+
+export interface BoundedAiContext {
+  value: unknown;
+  truncated: boolean;
+  originalChars: number;
+  maxContextChars: number;
+}
+
+/**
+ * Keep provider payloads bounded even when a large inventory is supplied.
+ * The preview is deliberately wrapped as data instead of cutting a JSON
+ * document in the middle, so the provider always receives valid JSON.
+ */
+export function boundAiContext(value: unknown, maxContextChars = 50_000): BoundedAiContext {
+  const max = Math.max(1_000, Math.floor(maxContextChars));
+  const serialized = JSON.stringify(value) ?? String(value);
+  if (serialized.length <= max) {
+    return { value, truncated: false, originalChars: serialized.length, maxContextChars: max };
+  }
+
+  const envelopeOverhead = 96;
+  const preview = serialized.slice(0, Math.max(0, max - envelopeOverhead));
+  return {
+    value: {
+      _aiWebTestContextTruncated: true,
+      originalChars: serialized.length,
+      preview,
+    },
+    truncated: true,
+    originalChars: serialized.length,
+    maxContextChars: max,
+  };
 }

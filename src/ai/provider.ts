@@ -1,4 +1,4 @@
-import { redactSecrets } from './redaction.js';
+import { boundAiContext, redactSecrets } from './redaction.js';
 
 export interface AiJsonRequest {
   task: string;
@@ -7,6 +7,10 @@ export interface AiJsonRequest {
   schemaDescription: string;
   input: unknown;
   images?: Array<{ mimeType: string; dataBase64: string; description?: string }>;
+  /** Per-request override used to keep prompts within the configured budget. */
+  maxContextChars?: number;
+  /** Project-specific field names that should be treated as secrets. */
+  additionalSecretKeys?: string[];
 }
 
 export interface AiJsonResponse<T> {
@@ -29,6 +33,7 @@ export interface OpenAiResponsesProviderOptions {
   projectEnv?: string;
   timeoutMs?: number;
   additionalSecretKeys?: string[];
+  maxContextChars?: number;
 }
 
 interface ResponsesApiPayload {
@@ -37,6 +42,8 @@ interface ResponsesApiPayload {
     content?: Array<{ type?: string; text?: string }>;
   }>;
 }
+
+const MAX_PROVIDER_RESPONSE_CHARS = 2_000_000;
 
 /**
  * Minimal provider for the OpenAI Responses API. It intentionally uses native
@@ -53,6 +60,7 @@ export class OpenAiResponsesProvider implements AiProvider {
       apiKeyEnv: options.apiKeyEnv ?? 'OPENAI_API_KEY',
       baseUrl: (options.baseUrl ?? 'https://api.openai.com/v1').replace(/\/$/, ''),
       timeoutMs: options.timeoutMs ?? 60_000,
+      maxContextChars: options.maxContextChars ?? 50_000,
     };
   }
 
@@ -62,7 +70,11 @@ export class OpenAiResponsesProvider implements AiProvider {
       throw new Error(`AI API key is missing. Set ${this.#options.apiKeyEnv}.`);
     }
 
-    const redactedInput = redactSecrets(request.input, this.#options.additionalSecretKeys);
+    const redactedInput = redactSecrets(request.input, [
+      ...(this.#options.additionalSecretKeys ?? []),
+      ...(request.additionalSecretKeys ?? []),
+    ]);
+    const bounded = boundAiContext(redactedInput, request.maxContextChars ?? this.#options.maxContextChars);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.#options.timeoutMs);
 
@@ -94,7 +106,17 @@ export class OpenAiResponsesProvider implements AiProvider {
               content: [
                 {
                   type: 'input_text',
-                  text: JSON.stringify({ task: request.task, input: redactedInput }),
+                  text: JSON.stringify({
+                    task: request.task,
+                    input: bounded.value,
+                    ...(bounded.truncated ? {
+                      context: {
+                        truncated: true,
+                        originalChars: bounded.originalChars,
+                        maxContextChars: bounded.maxContextChars,
+                      },
+                    } : {}),
+                  }),
                 },
                 ...(request.images ?? []).map((image) => ({
                   type: 'input_image',
@@ -107,12 +129,19 @@ export class OpenAiResponsesProvider implements AiProvider {
         }),
       });
 
+      const responseText = await response.text();
       if (!response.ok) {
-        const body = await response.text();
-        throw new Error(`AI provider returned HTTP ${response.status}: ${body.slice(0, 500)}`);
+        throw new Error(`AI provider returned HTTP ${response.status}: ${responseText.slice(0, 500)}`);
       }
-
-      const payload = (await response.json()) as ResponsesApiPayload;
+      if (responseText.length > MAX_PROVIDER_RESPONSE_CHARS) {
+        throw new Error(`AI provider response exceeded ${MAX_PROVIDER_RESPONSE_CHARS} characters.`);
+      }
+      let payload: ResponsesApiPayload;
+      try {
+        payload = JSON.parse(responseText) as ResponsesApiPayload;
+      } catch (error) {
+        throw new Error(`AI provider returned invalid response JSON: ${String(error)}`);
+      }
       const rawText = extractOutputText(payload);
       if (!rawText) throw new Error('AI provider returned no text output.');
 

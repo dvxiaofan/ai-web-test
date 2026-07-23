@@ -33,7 +33,7 @@ a source-controlled scenario file and copy it into that workspace during CI.
         {
           "id": "email",
           "action": "fill",
-          "risk": "read",
+          "risk": "mutate",
           "locator": { "strategy": "label", "value": "Email" },
           "value": "${TEST_USER_EMAIL}",
           "sensitive": true
@@ -87,4 +87,5 @@ Every step has a risk. A `mutate` or `destructive` scenario will fail plan
 approval unless the policy permits it and the required test-data namespace or
 explicit destructive allowlist is present. Sensitive values should be written
 as `${ENV_NAME}` or `env:ENV_NAME`; the executor resolves them at runtime and
-does not include their values in evidence.
+does not include their values in evidence. The scenario-level `risk` must be at
+least the highest effective risk of any step.

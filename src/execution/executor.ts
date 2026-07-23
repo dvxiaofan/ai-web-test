@@ -5,10 +5,13 @@ import type { Browser, BrowserContext, Locator, Page, Response } from 'playwrigh
 import {
   assertActionAllowed,
   contentDigest,
+  PolicyViolationError,
   stableId,
   type ArtifactRef,
   type AssertionResult,
   type BrowserProfile,
+  type ActionRisk,
+  type Finding,
   type Inventory,
   type JsonValue,
   type LocatorTarget,
@@ -20,6 +23,11 @@ import {
   type StepResult,
   type TestScenario,
 } from '../core/index.js';
+import {
+  evaluateRequestAccess,
+  type RequestAccessDecision,
+} from '../browser/host-policy.js';
+import { computePlanDigest, computeScenarioDigest } from '../planning/approval.js';
 import { compareOrCreateVisualSnapshot } from './visual.js';
 
 export interface ExecutePlanOptions {
@@ -61,8 +69,15 @@ interface ScenarioExecutionContext {
   defaultActionTimeoutMs: number;
 }
 
+interface RuntimeExecutionEvidence {
+  consoleErrors: string[];
+  pageErrors: string[];
+  failedRequests: Array<{ method: string; url: string; error?: string; status?: number }>;
+  visitedUrls: string[];
+}
+
 export async function executePlan(plan: RunPlan, options: ExecutePlanOptions): Promise<RunResult> {
-  assertApprovedPlan(plan);
+  assertApprovedPlan(plan, options.scenarios);
   const startedAt = new Date();
   const runId = stableId('run', `${plan.id}:${startedAt.toISOString()}`);
   const runDir = path.resolve(options.outputDir, runId);
@@ -119,6 +134,7 @@ export async function executePlan(plan: RunPlan, options: ExecutePlanOptions): P
   const endedAt = new Date();
   const coverage = buildRunCoverage(plan, selectedScenarios, scenarioResults, options.inventory);
   const status = deriveRunStatus(scenarioResults, infrastructureError);
+  const findings = buildExecutionFindings(runId, scenarioResults, endedAt.toISOString());
   const result: RunResult = {
     schemaVersion: 1,
     id: runId,
@@ -131,7 +147,7 @@ export async function executePlan(plan: RunPlan, options: ExecutePlanOptions): P
     endedAt: endedAt.toISOString(),
     durationMs: endedAt.getTime() - startedAt.getTime(),
     scenarios: scenarioResults,
-    findings: [],
+    findings,
     coverage,
     artifacts: [],
     environment: {
@@ -160,17 +176,65 @@ async function executeScenario(
   const scenarioDir = path.join(runDir, sanitizeFilename(`${scenario.id}-${role}-${profile.id}`));
   await mkdir(scenarioDir, { recursive: true });
   const storageState = role === 'anonymous' ? undefined : options.storageStateByRole?.[role];
+  if (role !== 'anonymous' && !storageState) {
+    return blockedScenarioResult(
+      scenario,
+      profile.id,
+      role,
+      new Error(`Role ${role} has no Playwright storage state. Generate an isolated test-account state before running authenticated scenarios.`),
+    );
+  }
   const context = await createContext(browser, profile, storageState, options.ignoreHTTPSErrors ?? false);
+  const activeStepRisk: { risk: ActionRisk } = { risk: scenario.risk };
+  let blockedRequestCount = 0;
+  let latestRequestViolation: RequestAccessDecision | undefined;
+  const runtimeEvidence: RuntimeExecutionEvidence = {
+    consoleErrors: [],
+    pageErrors: [],
+    failedRequests: [],
+    visitedUrls: [],
+  };
+  await installExecutionRequestGuard(
+    context,
+    plan,
+    scenario.risk,
+    activeStepRisk,
+    (decision) => {
+      blockedRequestCount += 1;
+      latestRequestViolation = decision;
+    },
+  );
+  const observedPages = new WeakSet<Page>();
+  const observeOpenedPage = (openedPage: Page) => {
+    if (observedPages.has(openedPage)) return;
+    observedPages.add(openedPage);
+    attachRuntimeEvidence(openedPage, runtimeEvidence, plan.policy.redactFields);
+  };
+  context.on('page', observeOpenedPage);
   const tracePath = path.join(scenarioDir, 'trace.zip');
-  if (options.captureTrace !== false) await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
+  const captureTrace = shouldPersistSensitiveArtifact(plan, options.captureTrace);
+  const captureFailureScreenshot = shouldPersistSensitiveArtifact(plan, options.captureScreenshotsOnFailure);
+  if (captureTrace) await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
   const page = await context.newPage();
+  observeOpenedPage(page);
   const responses: Response[] = [];
   page.on('response', (response) => responses.push(response));
+  page.on('response', (response) => {
+    if (response.status() >= 400 && runtimeEvidence.failedRequests.length < 100) {
+      runtimeEvidence.failedRequests.push({
+        method: response.request().method(),
+        url: redactRuntimeUrl(response.url(), plan.policy.redactFields),
+        status: response.status(),
+      });
+    }
+  });
 
   const stepResults: StepResult[] = [];
   let scenarioError: Error | undefined;
   try {
     for (const step of scenario.steps) {
+      activeStepRisk.risk = step.risk;
+      const violationsBeforeStep = blockedRequestCount;
       const stepResult = await executeStep({
         page,
         scenario,
@@ -185,6 +249,14 @@ async function executeScenario(
         failOnVisualDiff: options.failOnVisualDiff ?? true,
         defaultActionTimeoutMs: options.defaultActionTimeoutMs ?? 10_000,
       }, step);
+      // Background work from a completed step must not inherit a more
+      // permissive risk level while the next step is being prepared.
+      activeStepRisk.risk = scenario.risk;
+      if (stepResult.status !== 'blocked' && blockedRequestCount > violationsBeforeStep) {
+        const error = requestViolationError(latestRequestViolation);
+        stepResult.status = 'blocked';
+        stepResult.error = serializeError(error);
+      }
       stepResults.push(stepResult);
       options.onProgress?.({ type: 'step-finished', scenarioId: scenario.id, stepId: step.id, status: stepResult.status });
       if (stepResult.status === 'failed' || stepResult.status === 'error' || stepResult.status === 'blocked') {
@@ -195,25 +267,32 @@ async function executeScenario(
   } catch (error) {
     scenarioError = asError(error);
   }
+  if (scenarioError === undefined && blockedRequestCount > 0) {
+    scenarioError = requestViolationError(latestRequestViolation);
+  }
 
   const artifacts: ArtifactRef[] = [];
-  if (scenarioError && options.captureScreenshotsOnFailure !== false) {
+  if (scenarioError && captureFailureScreenshot) {
     const screenshotPath = path.join(scenarioDir, 'failure.png');
-    await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => undefined);
-    artifacts.push({ path: screenshotPath, kind: 'screenshot', mimeType: 'image/png' });
+    const saved = await page.screenshot({ path: screenshotPath, fullPage: true }).then(() => true).catch(() => false);
+    if (saved) artifacts.push({ path: screenshotPath, kind: 'screenshot', mimeType: 'image/png' });
   }
-  if (options.captureTrace !== false) {
-    await context.tracing.stop({ path: tracePath }).catch(() => undefined);
-    artifacts.push({ path: tracePath, kind: 'trace', mimeType: 'application/zip' });
+  if (captureTrace) {
+    const saved = await context.tracing.stop({ path: tracePath }).then(() => true).catch(() => false);
+    if (saved) artifacts.push({ path: tracePath, kind: 'trace', mimeType: 'application/zip' });
   }
   await context.close();
 
   const endedAt = new Date();
-  const blocked = stepResults.some((step) => step.status === 'blocked');
+  const blocked = blockedRequestCount > 0 || stepResults.some((step) => step.status === 'blocked');
   const status: ScenarioResult['status'] = blocked ? 'blocked' : scenarioError ? 'failed' : 'passed';
   const observedApis = responses
     .filter((response) => ['xhr', 'fetch'].includes(response.request().resourceType()))
-    .map((response) => ({ method: response.request().method(), url: response.url(), status: response.status() }));
+    .map((response) => ({
+      method: response.request().method(),
+      url: redactRuntimeUrl(response.url(), plan.policy.redactFields),
+      status: response.status(),
+    }));
   return {
     scenarioId: scenario.id,
     role,
@@ -226,7 +305,14 @@ async function executeScenario(
     findingIds: [],
     artifacts,
     ...(scenarioError ? { error: serializeError(scenarioError) } : {}),
-    metadata: { observedApis },
+    metadata: {
+      observedApis,
+      blockedRequestCount,
+      consoleErrors: runtimeEvidence.consoleErrors,
+      pageErrors: runtimeEvidence.pageErrors,
+      failedRequests: runtimeEvidence.failedRequests,
+      visitedUrls: runtimeEvidence.visitedUrls,
+    },
   };
 }
 
@@ -240,6 +326,16 @@ async function executeStep(context: ScenarioExecutionContext, step: ScenarioStep
       { name: step.name?.trim() || step.id, risk: step.risk, ...(step.action === 'navigate' ? { url: step.url } : {}) },
       context.plan.target.baseUrl,
     );
+    if (step.action === 'screenshot' && !context.plan.policy.allowSecretPersistence) {
+      throw new PolicyViolationError(
+        { name: step.name?.trim() || step.id, risk: step.risk },
+        {
+          allowed: false,
+          code: 'action-blocked',
+          reason: 'Screenshot and visual artifact persistence are disabled by the run policy.',
+        },
+      );
+    }
     context.page.setDefaultTimeout(step.timeoutMs ?? context.defaultActionTimeoutMs);
 
     switch (step.action) {
@@ -280,9 +376,10 @@ async function executeStep(context: ScenarioExecutionContext, step: ScenarioStep
         const screenshotPath = path.join(context.outputDir, `${sanitizeFilename(step.name ?? step.id)}.png`);
         await context.page.screenshot({ path: screenshotPath, fullPage: step.fullPage ?? true });
         artifacts.push({ path: screenshotPath, kind: 'screenshot', mimeType: 'image/png' });
+        const baselineKey = namespacedBaselineKey(context, step.baselineKey ?? step.id);
         const visual = await compareOrCreateVisualSnapshot(screenshotPath, {
           ...(context.visualBaselineDir ? { baselineDir: context.visualBaselineDir } : {}),
-          ...(step.baselineKey ? { baselineKey: step.baselineKey } : {}),
+          baselineKey,
           updateBaseline: context.updateVisualBaselines,
         });
         if (visual.baselinePath) {
@@ -296,6 +393,11 @@ async function executeStep(context: ScenarioExecutionContext, step: ScenarioStep
       case 'evaluate':
         await context.page.evaluate(step.expression);
         break;
+      default:
+        // Scenario files are untrusted runtime input. Keep this guard even
+        // though the TypeScript union makes the branch unreachable for typed
+        // callers; an unknown JSON action must never be reported as passed.
+        throw new Error(`Unsupported scenario action: ${String((step as { action?: unknown }).action)}`);
     }
 
     const endedAt = new Date();
@@ -449,6 +551,9 @@ async function createContext(browser: Browser, profile: BrowserProfile, storageS
   return browser.newContext({
     viewport: profile.viewport,
     ignoreHTTPSErrors,
+    // Service workers can issue requests outside page routing. Blocking them
+    // keeps the context-level origin/method guard authoritative.
+    serviceWorkers: 'block',
     ...(storageState ? { storageState } : {}),
     ...(profile.deviceScaleFactor !== undefined ? { deviceScaleFactor: profile.deviceScaleFactor } : {}),
     ...(profile.isMobile !== undefined ? { isMobile: profile.isMobile } : {}),
@@ -458,6 +563,109 @@ async function createContext(browser: Browser, profile: BrowserProfile, storageS
     ...(profile.timezoneId ? { timezoneId: profile.timezoneId } : {}),
     ...(profile.userAgent ? { userAgent: profile.userAgent } : {}),
   });
+}
+
+interface ExecutionRequestPolicy {
+  baseUrl: string;
+  allowedHosts: string[];
+  blockedHosts: string[];
+  allowExternalOrigins: boolean;
+  maxRisk: RunPlan['policy']['maxRisk'];
+}
+
+/** Sensitive browser evidence is opt-in twice: caller request and policy. */
+export function shouldPersistSensitiveArtifact(
+  plan: Pick<RunPlan, 'policy'>,
+  requested: boolean | undefined,
+): boolean {
+  return requested === true && plan.policy.allowSecretPersistence === true;
+}
+
+/** Install the network boundary before the first page is created. */
+export async function installExecutionRequestGuard(
+  context: BrowserContext,
+  plan: Pick<RunPlan, 'target' | 'policy'>,
+  scenarioRisk: ActionRisk = plan.policy.maxRisk,
+  activeStepRisk?: { risk: ActionRisk },
+  onBlocked?: (decision: RequestAccessDecision) => void,
+): Promise<void> {
+  await context.route('**/*', async (route) => {
+    const request = route.request();
+    const effectiveRisk = minimumRisk(plan.policy.maxRisk, scenarioRisk, activeStepRisk?.risk);
+    const policy = requestPolicyFromPlan(plan, effectiveRisk);
+    const decision = evaluateRequestAccess(request.url(), request.method(), policy);
+    if (!decision.allowed) {
+      onBlocked?.(decision);
+      await route.abort('blockedbyclient');
+      return;
+    }
+    await route.continue();
+  });
+  if (typeof context.routeWebSocket !== 'function') {
+    throw new Error('This Playwright version cannot enforce WebSocket policy. Upgrade Playwright before executing scenarios.');
+  }
+  await context.routeWebSocket('**/*', async (webSocketRoute) => {
+    const effectiveRisk = minimumRisk(plan.policy.maxRisk, scenarioRisk, activeStepRisk?.risk);
+    const policy = requestPolicyFromPlan(plan, effectiveRisk);
+    const decision = evaluateRequestAccess(webSocketRoute.url(), 'WEBSOCKET', policy);
+    if (!decision.allowed) {
+      onBlocked?.(decision);
+      await webSocketRoute.close({ code: 1008, reason: 'Blocked by AI Web Test policy' });
+      return;
+    }
+    webSocketRoute.connectToServer();
+  });
+}
+
+function requestViolationError(decision: RequestAccessDecision | undefined): PolicyViolationError {
+  const method = decision?.method || 'UNKNOWN';
+  const origin = decision?.origin || 'unknown origin';
+  const reason = decision?.reason;
+  const reasonLabel = reason ?? 'request-policy-violation';
+  return new PolicyViolationError(
+    { name: `HTTP ${method} ${origin}`, risk: decision?.risk ?? 'destructive' },
+    {
+      allowed: false,
+      code: requestViolationCode(reason),
+      reason: `Browser request blocked by policy (${reasonLabel}): ${method} ${origin}.`,
+    },
+  );
+}
+
+function requestViolationCode(reason: RequestAccessDecision['reason'] | undefined): 'risk-exceeds-plan' | 'invalid-url' | 'host-blocked' | 'external-origin-blocked' {
+  if (reason === 'request-method-blocked') return 'risk-exceeds-plan';
+  if (reason === 'blocked-host') return 'host-blocked';
+  if (reason === 'external-host') return 'external-origin-blocked';
+  return 'invalid-url';
+}
+
+function requestPolicyFromPlan(
+  plan: Pick<RunPlan, 'target' | 'policy'>,
+  maxRisk = plan.policy.maxRisk,
+): ExecutionRequestPolicy {
+  return {
+    baseUrl: plan.target.baseUrl,
+    allowedHosts: [...plan.policy.allowedHosts],
+    blockedHosts: [...plan.policy.blockedHosts],
+    allowExternalOrigins: plan.policy.allowExternalOrigins,
+    maxRisk,
+  };
+}
+
+function minimumRisk(...risks: Array<ActionRisk | undefined>): ActionRisk {
+  const available = risks.filter((risk): risk is ActionRisk => risk !== undefined);
+  return available.reduce((minimum, risk) => (riskRank(risk) < riskRank(minimum) ? risk : minimum), 'destructive' as ActionRisk);
+}
+
+function riskRank(risk: ActionRisk): number {
+  switch (risk) {
+    case 'read':
+      return 0;
+    case 'mutate':
+      return 1;
+    case 'destructive':
+      return 2;
+  }
 }
 
 function compareValues(
@@ -501,7 +709,7 @@ function selectPlanScenarios(plan: RunPlan, scenarios: TestScenario[]): TestScen
   return [...new Set(selectedIds)].map((id) => byId.get(id)).filter((scenario): scenario is TestScenario => Boolean(scenario));
 }
 
-function assertApprovedPlan(plan: RunPlan): void {
+function assertApprovedPlan(plan: RunPlan, scenarios: readonly TestScenario[]): void {
   if (plan.status !== 'approved' || !plan.approval) {
     throw new Error(`Run plan ${plan.id} is not approved. Refusing to execute browser actions.`);
   }
@@ -510,6 +718,15 @@ function assertApprovedPlan(plan: RunPlan): void {
   }
   if (plan.approval.policyDigest !== contentDigest(plan.policy)) {
     throw new Error('Run plan policy changed after approval. Re-plan and approve again.');
+  }
+  if (plan.approval.scenarioDigest !== plan.scenarioDigest) {
+    throw new Error('Run plan scenario definitions changed after approval. Re-plan and approve again.');
+  }
+  if (computeScenarioDigest(scenarios, plan.scenarioIds) !== plan.scenarioDigest) {
+    throw new Error('Run plan scenario catalog changed after approval. Re-plan and approve again.');
+  }
+  if (plan.approval.planDigest !== plan.digest || plan.digest !== computePlanDigest(plan)) {
+    throw new Error('Run plan contents changed after approval. Re-plan and approve again.');
   }
 }
 
@@ -545,12 +762,22 @@ function buildRunCoverage(
   const passedRouteIds = new Set(scenarios.filter((scenario) => passedIds.has(scenario.id)).flatMap((scenario) => scenario.routeIds));
   const failedRouteIds = new Set(scenarios.filter((scenario) => failedIds.has(scenario.id)).flatMap((scenario) => scenario.routeIds));
   const knownRouteIds = new Set(inventory?.nodes.filter((node) => node.kind === 'route').map((node) => node.id) ?? []);
-  const unresolvedIds = [...routeIds].filter((id) => knownRouteIds.size > 0 && !knownRouteIds.has(id));
+  const visitedRouteIds = matchVisitedRouteIds(results, inventory, routeIds);
+  const unresolvedIds = [...routeIds].filter((id) => knownRouteIds.size > 0 && !visitedRouteIds.has(id));
   const observedApiIds = matchObservedApiIds(results, inventory);
   const assertedApiIds = new Set(scenarios.filter((scenario) => scenario.steps.some((step) => step.action === 'assert' && step.assertion === 'status')).flatMap((scenario) => scenario.operationIds));
+  const failedVisitedRouteIds = [...failedRouteIds].filter((id) => visitedRouteIds.has(id));
   return {
-    routes: { selected: routeIds.size, visited: routeIds.size - unresolvedIds.length, passed: passedRouteIds.size },
-    pages: { selected: routeIds.size, rendered: routeIds.size - unresolvedIds.length, failed: failedRouteIds.size },
+    routes: {
+      selected: routeIds.size,
+      visited: visitedRouteIds.size,
+      passed: [...passedRouteIds].filter((id) => visitedRouteIds.has(id)).length,
+    },
+    pages: {
+      selected: routeIds.size,
+      rendered: Math.max(0, visitedRouteIds.size - failedVisitedRouteIds.length),
+      failed: failedVisitedRouteIds.length,
+    },
     apis: { selected: apiIds.size, observed: observedApiIds.size, asserted: assertedApiIds.size },
     scenarios: {
       selected: scenarios.length,
@@ -586,6 +813,29 @@ function matchObservedApiIds(results: ScenarioResult[], inventory?: Inventory): 
   return matched;
 }
 
+function matchVisitedRouteIds(
+  results: ScenarioResult[],
+  inventory: Inventory | undefined,
+  selectedRouteIds: ReadonlySet<string>,
+): Set<string> {
+  const matched = new Set<string>();
+  if (!inventory) return matched;
+  const routes = inventory.nodes.filter((node): node is Extract<Inventory['nodes'][number], { kind: 'route' }> => node.kind === 'route');
+  for (const result of results) {
+    const visitedUrls = result.metadata?.visitedUrls;
+    if (!Array.isArray(visitedUrls)) continue;
+    for (const rawUrl of visitedUrls) {
+      if (typeof rawUrl !== 'string') continue;
+      let pathname = rawUrl;
+      try { pathname = new URL(rawUrl).pathname; } catch { /* keep a relative path */ }
+      for (const route of routes) {
+        if (selectedRouteIds.has(route.id) && routePathMatches(route.path, pathname)) matched.add(route.id);
+      }
+    }
+  }
+  return matched;
+}
+
 function apiPathMatches(pattern: string, pathname: string): boolean {
   const tokenized = (pattern.split('?')[0] ?? pattern)
     .replace(/\$\{[^}]+\}/g, '__AIWEBTEST_DYNAMIC__')
@@ -597,6 +847,160 @@ function apiPathMatches(pattern: string, pathname: string): boolean {
   return new RegExp(`^${normalized}$`).test(pathname);
 }
 
+function routePathMatches(pattern: string, pathname: string): boolean {
+  const tokenized = pattern
+    .replace(/\[\.\.\.[^\]]+\]/g, '__AIWEBTEST_DYNAMIC__')
+    .replace(/\[[^\]]+\]/g, '__AIWEBTEST_DYNAMIC__')
+    .replace(/:[^/]+/g, '__AIWEBTEST_DYNAMIC__')
+    .replace(/\*/g, '__AIWEBTEST_DYNAMIC__');
+  const normalized = tokenized
+    .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+    .replace(/__AIWEBTEST_DYNAMIC__/g, '[^/]+');
+  const normalizedPattern = normalized === '/' ? '/' : normalized.replace(/\/$/, '');
+  const normalizedPath = pathname === '/' ? '/' : pathname.replace(/\/$/, '');
+  return new RegExp(`^${normalizedPattern}$`).test(normalizedPath);
+}
+
+function attachRuntimeEvidence(page: Page, evidence: RuntimeExecutionEvidence, redactFields: readonly string[]): void {
+  page.on('console', (message) => {
+    if (message.type() === 'error' && evidence.consoleErrors.length < 100) {
+      evidence.consoleErrors.push(redactRuntimeText(message.text(), redactFields));
+    }
+  });
+  page.on('pageerror', (error) => {
+    if (evidence.pageErrors.length < 100) evidence.pageErrors.push(redactRuntimeText(error.message, redactFields));
+  });
+  page.on('requestfailed', (request) => {
+    if (evidence.failedRequests.length >= 100) return;
+    const failure = request.failure()?.errorText;
+    evidence.failedRequests.push({
+      method: request.method(),
+      url: redactRuntimeUrl(request.url(), redactFields),
+      ...(failure === undefined ? {} : { error: redactRuntimeText(failure, redactFields) }),
+    });
+  });
+  page.on('framenavigated', (frame) => {
+    if (frame !== page.mainFrame() || evidence.visitedUrls.length >= 100) return;
+    const url = redactRuntimeUrl(frame.url(), redactFields);
+    if (!evidence.visitedUrls.includes(url)) evidence.visitedUrls.push(url);
+  });
+}
+
+function namespacedBaselineKey(context: ScenarioExecutionContext, key: string): string {
+  const viewport = `${context.profile.viewport.width}x${context.profile.viewport.height}`;
+  const colorScheme = context.profile.colorScheme ?? 'no-preference';
+  return `${context.role}/${context.profile.id}/${viewport}/${colorScheme}/${key}`;
+}
+
+function redactRuntimeText(value: string, redactFields: readonly string[]): string {
+  let output = value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]')
+    .replace(/\b(?:sk-|pk_live_|pk_test_)[A-Za-z0-9_-]{8,}\b/g, '[REDACTED]');
+  for (const field of redactFields) {
+    if (!field.trim()) continue;
+    const escaped = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    output = output.replace(new RegExp(`(${escaped}\\s*[:=]\\s*)([^\\s,;]+)`, 'gi'), '$1[REDACTED]');
+  }
+  return output;
+}
+
+function redactRuntimeUrl(rawUrl: string, redactFields: readonly string[]): string {
+  try {
+    const url = new URL(rawUrl);
+    const sensitive = new Set([
+      'token',
+      'access_token',
+      'refresh_token',
+      'password',
+      'secret',
+      'key',
+      ...redactFields.map((field) => field.toLowerCase()),
+    ]);
+    for (const key of [...url.searchParams.keys()]) {
+      if (sensitive.has(key.toLowerCase())) url.searchParams.set(key, '[REDACTED]');
+    }
+    url.username = '';
+    url.password = '';
+    return url.href;
+  } catch {
+    return redactRuntimeText(rawUrl, redactFields);
+  }
+}
+
+function buildExecutionFindings(runId: string, results: readonly ScenarioResult[], now: string): Finding[] {
+  const findings: Finding[] = [];
+  const add = (
+    result: ScenarioResult,
+    category: Finding['category'],
+    severity: Finding['severity'],
+    title: string,
+    summary: string,
+  ) => {
+    const id = stableId('finding', `${runId}:${result.scenarioId}:${result.role}:${result.browserProfileId}:${title}:${summary}`);
+    findings.push({
+      id,
+      category,
+      classification: category === 'environment' ? 'environment-failure' : 'probable-defect',
+      severity,
+      status: 'open',
+      confidence: 0.9,
+      title,
+      summary,
+      evidence: [{
+        id: stableId('evidence', id),
+        kind: 'runtime',
+        summary,
+        confidence: 1,
+        observedAt: now,
+        metadata: { role: result.role, browserProfileId: result.browserProfileId },
+      }],
+      relatedIds: [result.scenarioId],
+      createdAt: now,
+      fingerprint: id,
+    });
+  };
+
+  for (const result of results) {
+    for (const message of metadataStrings(result.metadata?.pageErrors).slice(0, 20)) {
+      add(result, 'defect', 'high', `Page error in ${result.scenarioId}`, message);
+    }
+    for (const message of metadataStrings(result.metadata?.consoleErrors).slice(0, 20)) {
+      add(result, 'defect', 'medium', `Console error in ${result.scenarioId}`, message);
+    }
+    if (result.status !== 'blocked') {
+      for (const request of metadataRequests(result.metadata?.failedRequests).slice(0, 20)) {
+        add(
+          result,
+          'environment',
+          request.status !== undefined && request.status >= 500 ? 'high' : 'medium',
+          `Request failed in ${result.scenarioId}`,
+          `${request.method} ${request.url}: ${request.error ?? request.status ?? 'failed'}`,
+        );
+      }
+    }
+  }
+  return findings;
+}
+
+function metadataStrings(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function metadataRequests(value: unknown): Array<{ method: string; url: string; status?: number; error?: string }> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) return [];
+    const request = item as Record<string, unknown>;
+    if (typeof request.method !== 'string' || typeof request.url !== 'string') return [];
+    return [{
+      method: request.method,
+      url: request.url,
+      ...(typeof request.status === 'number' ? { status: request.status } : {}),
+      ...(typeof request.error === 'string' ? { error: request.error } : {}),
+    }];
+  });
+}
+
 function deriveRunStatus(results: ScenarioResult[], infrastructureError?: Error): RunResult['status'] {
   if (infrastructureError && results.every((result) => result.status === 'blocked')) return 'blocked';
   if (results.some((result) => result.status === 'failed' || result.status === 'error')) return 'failed';
@@ -605,7 +1009,11 @@ function deriveRunStatus(results: ScenarioResult[], infrastructureError?: Error)
 }
 
 function serializeError(error: Error): { name: string; message: string; stack?: string } {
-  return { name: error.name, message: error.message, ...(error.stack ? { stack: error.stack } : {}) };
+  return {
+    name: error.name,
+    message: redactRuntimeText(error.message, []),
+    ...(error.stack ? { stack: redactRuntimeText(error.stack, []) } : {}),
+  };
 }
 
 function asError(value: unknown): Error {

@@ -6,15 +6,17 @@ dist/
 coverage/
 *.tsbuildinfo
 
-# AI Web Test runtime artifacts
+# AI Web Test runtime artifacts (may contain URLs, screenshots, traces, and
+# other target-project data; never commit these by default)
 .ai-web-test/
 .tmp-e2e-runs/
 playwright-report/
 blob-report/
 test-results/
 .playwright/
-auth/
-.auth/
+# Keep the explicit entries as documentation for nested/legacy workspaces.
+.ai-web-test/auth/
+.ai-web-test/.auth/
 storage-state*.json
 
 # Local-only verification files
@@ -26,6 +28,8 @@ vitest.check.config.mjs
 .env
 .env.*
 !.env.example
+*.secret
+*.secrets
 *.pem
 *.key
 *.p12
