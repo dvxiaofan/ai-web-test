@@ -5,9 +5,11 @@ import {
   type JsonObject,
   type JsonValue,
   type LocatorTarget,
+  type ScenarioProposal,
   type ScenarioStep,
   type TestScenario,
 } from '../core/index.js';
+import { validateProposalShape } from './proposal-schema.js';
 
 const ACTIONS = new Set([
   'navigate',
@@ -98,6 +100,44 @@ export async function writeScenarios(filePath: string, scenarios: TestScenario[]
     ids.add(scenario.id);
   }
   await writeJsonFile(filePath, { schemaVersion: 1, generatedAt: new Date().toISOString(), scenarios: checked });
+}
+
+/**
+ * Phase 3 — proposal persistence.
+ *
+ * Proposals are the draft pool an agent or discovery produces. `writeProposals`
+ * validates shape at the boundary; `readProposals` re-validates so a corrupted
+ * or hand-edited proposal file can never silently enter the import pipeline.
+ */
+export interface ProposalCatalogFile {
+  schemaVersion: number;
+  generatedAt?: string;
+  proposals: ScenarioProposal[];
+}
+
+export async function writeProposals(filePath: string, proposals: ScenarioProposal[]): Promise<void> {
+  for (const [index, proposal] of proposals.entries()) {
+    const result = validateProposalShape(proposal, `${filePath}.proposals[${index}]`);
+    if (!result.valid) {
+      throw new ScenarioValidationError(`${filePath}.proposals[${index}]`, result.errors.join('; '));
+    }
+  }
+  await writeJsonFile(filePath, { schemaVersion: 1, generatedAt: new Date().toISOString(), proposals });
+}
+
+export async function readProposals(filePath: string): Promise<ScenarioProposal[]> {
+  const value = await readJsonFile<unknown>(filePath);
+  const candidates = isRecord(value) && Array.isArray(value.proposals) ? value.proposals : undefined;
+  if (!candidates) throw new Error(`Proposal file ${filePath} must contain { proposals: [] }.`);
+  if (isRecord(value)) requireExactVersion(value.schemaVersion, `${filePath}.schemaVersion`);
+
+  const proposals: ScenarioProposal[] = [];
+  for (const [index, candidate] of candidates.entries()) {
+    const result = validateProposalShape(candidate, `${filePath}.proposals[${index}]`);
+    if (!result.valid) throw new ScenarioValidationError(`${filePath}.proposals[${index}]`, result.errors.join('; '));
+    proposals.push(candidate as ScenarioProposal);
+  }
+  return proposals;
 }
 
 /** Validate one untrusted scenario and return it only after all runtime checks pass. */

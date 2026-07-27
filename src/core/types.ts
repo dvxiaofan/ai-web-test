@@ -386,6 +386,53 @@ export type ScenarioStep =
 
 export type ScenarioSource = "generated" | "user" | "discovered" | "imported";
 
+/**
+ * Phase 3 — a ScenarioProposal is the draft artifact an AI agent or discovery
+ * produces before a scenario enters the executable catalog. Proposals must pass
+ * `validateProposal` against the inventory before `importProposals` converts
+ * them into `TestScenario` records. This gate keeps the catalog read-only-safe
+ * and keeps every scenario traceable to an inventory page/route/role.
+ */
+export type ProposalStatus = "pending" | "accepted" | "rejected";
+export type ProposalSource = "discovery" | "ai" | "manual" | "import";
+
+export interface ProposalStep {
+  action: string;
+  target?: string;
+  locator?: LocatorTarget;
+  value?: string;
+  url?: string;
+  description?: string;
+}
+
+export type ProposalEvidenceType = "locator" | "route" | "role" | "screenshot" | "trace" | "observation";
+
+export interface ProposalEvidence {
+  type: ProposalEvidenceType;
+  value: string;
+}
+
+export interface ScenarioProposal {
+  id: string;
+  schemaVersion: number;
+  name: string;
+  description?: string;
+  source: ProposalSource;
+  moduleId?: string;
+  routeId?: string;
+  pageId?: string;
+  pageUrl?: string;
+  roleIds: string[];
+  tags: string[];
+  risk: ActionRisk;
+  expectedOutcome?: string;
+  steps: ProposalStep[];
+  evidence: ProposalEvidence[];
+  createdAt: IsoDateTime;
+  status: ProposalStatus;
+  rejectionReason?: string;
+}
+
 export interface TestScenario {
   schemaVersion: 1;
   id: string;
