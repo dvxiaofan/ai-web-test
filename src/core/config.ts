@@ -13,6 +13,8 @@ import type {
   TestLevel,
   TestPolicy,
 } from "./types.js";
+import { isSupportedStrategy } from "../auth/index.js";
+import type { RoleAuthConfig } from "../auth/index.js";
 
 export const CONFIG_SCHEMA_VERSION = 1 as const;
 
@@ -138,6 +140,43 @@ export interface PresetConfig {
   maxRisk: ActionRisk;
 }
 
+export interface AuthCredentialInput {
+  usernameEnv?: string;
+  passwordEnv?: string;
+  tokenEnv?: string;
+  apiKeyEnv?: string;
+  extraEnv?: string[];
+}
+
+export interface AuthTargetInput {
+  baseUrl?: string;
+  loginUrl?: string;
+  tokenUrl?: string;
+  scriptPath?: string;
+  storageStatePath?: string;
+  headers?: Record<string, string>;
+}
+
+export interface AuthRoleConfigInput {
+  id?: string;
+  name: string;
+  strategy?: string;
+  credentials?: AuthCredentialInput;
+  target?: AuthTargetInput;
+  sessionMaxAgeMs?: number;
+  metadata?: JsonObject;
+}
+
+export interface AuthConfigInput {
+  roles?: AuthRoleConfigInput[];
+}
+
+export type AuthRoleConfig = RoleAuthConfig;
+
+export interface AuthConfig {
+  roles: AuthRoleConfig[];
+}
+
 export interface ProjectConfigInput {
   schemaVersion?: number;
   /** Short-form project name; equivalent to project.name. */
@@ -152,6 +191,7 @@ export interface ProjectConfigInput {
   source?: SourceConfigInput;
   runtime?: RuntimeConfigInput;
   roles?: RoleConfigInput[];
+  auth?: AuthConfigInput;
   policy?: Partial<TestPolicy>;
   ai?: AiConfigInput;
   presets?: Record<string, PresetConfigInput>;
@@ -168,6 +208,7 @@ export interface ProjectConfig {
   source: SourceConfig;
   runtime: RuntimeConfig;
   roles: RoleConfig[];
+  auth: AuthConfig;
   policy: TestPolicy;
   ai: AiConfig;
   presets: Record<string, PresetConfig>;
@@ -274,6 +315,7 @@ export function collectConfigIssues(input: unknown, options: ConfigValidationOpt
   validateProfiles(runtime.profiles, issues);
 
   validateRoles(input.roles, configDir, issues);
+  validateAuthRoles(input.auth, issues);
   validatePolicy(input.policy, issues);
   validateAi(input.ai, issues);
   validateArtifacts(input.artifacts, issues);
@@ -349,6 +391,7 @@ function buildConfig(input: ProjectConfigInput, options: ConfigValidationOptions
   };
 
   const roles = buildRoles(input.roles, rootDir);
+  const auth = { roles: buildAuthRoles(input.auth, rootDir, rawBaseUrl) };
   const policyBase = createDefaultPolicy(rawBaseUrl);
   const policy = mergeTestPolicy(policyBase, isRecord(input.policy) ? (input.policy as Partial<TestPolicy>) : {});
   if (target.allowProductionLikeHost) {
@@ -377,6 +420,7 @@ function buildConfig(input: ProjectConfigInput, options: ConfigValidationOptions
     source,
     runtime,
     roles,
+    auth,
     policy,
     ai,
     presets,
@@ -493,6 +537,80 @@ function validatePresets(value: unknown, issues: ConfigValidationIssue[]): void 
     validateStringArray(preset.roles, `presets.${name}.roles`, issues);
     validateStringArray(preset.browserProfileIds, `presets.${name}.browserProfileIds`, issues);
   }
+}
+
+function validateAuthRoles(value: unknown, issues: ConfigValidationIssue[]): void {
+  if (value === undefined) return;
+  if (!isRecord(value)) {
+    issues.push({ path: "auth", code: "type", message: "auth must be an object." });
+    return;
+  }
+  if (value.roles !== undefined) {
+    if (!Array.isArray(value.roles)) {
+      issues.push({ path: "auth.roles", code: "type", message: "auth.roles must be an array." });
+      return;
+    }
+    const names = new Set<string>();
+    for (const [index, role] of value.roles.entries()) {
+      const prefix = `auth.roles[${index}]`;
+      if (!isRecord(role)) {
+        issues.push({ path: prefix, code: "type", message: "Auth role must be an object." });
+        continue;
+      }
+      if (typeof role.name !== "string" || role.name.trim().length === 0) {
+        issues.push({ path: `${prefix}.name`, code: "required", message: "Auth role name is required." });
+      } else if (names.has(role.name)) {
+        issues.push({ path: `${prefix}.name`, code: "duplicate", message: `Duplicate auth role name: ${role.name}.` });
+      } else {
+        names.add(role.name);
+      }
+      if (role.strategy !== undefined && !isSupportedStrategy(String(role.strategy))) {
+        issues.push({ path: `${prefix}.strategy`, code: "value", message: "Unknown auth strategy." });
+      }
+      if (role.credentials !== undefined) {
+        const creds = isRecord(role.credentials) ? role.credentials : {};
+        validateEnvName(creds.usernameEnv, `${prefix}.credentials.usernameEnv`, issues);
+        validateEnvName(creds.passwordEnv, `${prefix}.credentials.passwordEnv`, issues);
+        validateEnvName(creds.tokenEnv, `${prefix}.credentials.tokenEnv`, issues);
+        validateEnvName(creds.apiKeyEnv, `${prefix}.credentials.apiKeyEnv`, issues);
+        validateStringArray(creds.extraEnv, `${prefix}.credentials.extraEnv`, issues);
+      }
+      if (role.target !== undefined) {
+        const target = isRecord(role.target) ? role.target : {};
+        if (target.loginUrl !== undefined) validateBaseUrl(target.loginUrl, `${prefix}.target.loginUrl`, issues);
+        if (target.tokenUrl !== undefined && typeof target.tokenUrl !== "string") {
+          issues.push({ path: `${prefix}.target.tokenUrl`, code: "type", message: "tokenUrl must be a string." });
+        }
+        if (target.scriptPath !== undefined) validatePath(target.scriptPath, `${prefix}.target.scriptPath`, issues);
+        if (target.storageStatePath !== undefined) validatePath(target.storageStatePath, `${prefix}.target.storageStatePath`, issues);
+        if (target.headers !== undefined) validateStringMap(target.headers, `${prefix}.target.headers`, issues);
+      }
+    }
+  }
+}
+
+function buildAuthRoles(value: unknown, rootDir: string, baseUrl: string | undefined): AuthRoleConfig[] {
+  if (!isRecord(value) || !Array.isArray(value.roles)) return [];
+  return value.roles.map((raw, index) => {
+    const role = isRecord(raw) ? raw : {};
+    const name = typeof role.name === "string" ? role.name.trim() : `auth-role-${index + 1}`;
+    const target = isRecord(role.target) ? role.target : {};
+    const credentials = isRecord(role.credentials) ? (role.credentials as AuthCredentialInput) : undefined;
+    return {
+      id: typeof role.id === "string" && role.id.trim().length > 0 ? role.id : stableId("auth-role", name),
+      name,
+      strategy: isSupportedStrategy(String(role.strategy)) ? String(role.strategy) as AuthRoleConfig["strategy"] : "auto",
+      ...(credentials ? { credentials } : {}),
+      target: {
+        baseUrl: typeof target.baseUrl === "string" ? target.baseUrl : baseUrl ?? "",
+        ...(typeof target.loginUrl === "string" ? { loginUrl: target.loginUrl } : {}),
+        ...(typeof target.tokenUrl === "string" ? { tokenUrl: target.tokenUrl } : {}),
+        ...(typeof target.scriptPath === "string" ? { scriptPath: path.resolve(rootDir, target.scriptPath) } : {}),
+        ...(typeof target.storageStatePath === "string" ? { storageStatePath: path.resolve(rootDir, target.storageStatePath) } : {}),
+        ...(isRecord(target.headers) ? { headers: cloneStringMap(target.headers) } : {}),
+      },
+    } satisfies AuthRoleConfig;
+  });
 }
 
 function validateProfiles(value: unknown, issues: ConfigValidationIssue[]): void {

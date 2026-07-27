@@ -21,6 +21,8 @@ import {
   type TestScenario,
 } from './core/index.js';
 import { deriveProjectId, generateOperationId, AgentError, type AgentState } from './agent/index.js';
+import { authenticate, saveStorageState } from './auth/index.js';
+import { createBrowserAuthSession } from './browser/auth-surface.js';
 import { discoverSource } from './discovery/index.js';
 import { exploreBrowser } from './browser/index.js';
 import { mergeBrowserExploration, summarizeInventory } from './inventory/index.js';
@@ -76,6 +78,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         break;
       case 'status':
         await commandStatus(args, output);
+        break;
+      case 'auth':
+        await commandAuth(args, output);
         break;
       case 'help':
       case '--help':
@@ -454,6 +459,46 @@ async function commandStatus(args: ReturnType<typeof parseCliArgs>, output: CliO
   output.result({ inventory: summarizeInventory(inventory, scenarios), artifacts: store.layout });
 }
 
+async function commandAuth(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
+  const config = await readConfig(args);
+  const roleId = getStringOption(args, 'role');
+  const roles = config.auth.roles;
+  const role =
+    (roleId ? roles.find((candidate) => candidate.id === roleId) : undefined) ??
+    roles.find((candidate) => candidate.target?.storageStatePath) ??
+    roles[0];
+  if (!role) {
+    output.error(new AgentError('AUTH_NO_ROLE', 'No auth role configured. Add auth.roles to your config.', false));
+    process.exitCode = 1;
+    return;
+  }
+
+  const outputPath =
+    role.target?.storageStatePath ?? path.join(config.artifacts.directory, 'auth', `${role.id}.json`);
+  const session = await createBrowserAuthSession(config);
+  try {
+    output.setContext({ projectId: deriveProjectId(config.target) });
+    const outcome = await authenticate(role, {
+      env: (name) => process.env[name],
+      surface: session.surface,
+    });
+    if (!outcome.ok) {
+      output.error(new AgentError('AUTH_FAILED', outcome.reason.message, outcome.reason.retryable));
+      process.exitCode = 1;
+      return;
+    }
+    await saveStorageState(outputPath, outcome.storageState);
+    output.result({
+      roleId: role.id,
+      strategy: outcome.strategy,
+      storageStatePath: outputPath,
+      warnings: outcome.warnings,
+    });
+  } finally {
+    await session.close();
+  }
+}
+
 async function readConfig(args: ReturnType<typeof parseCliArgs>): Promise<ProjectConfig> {
   const configPath = path.resolve(process.cwd(), getStringOption(args, 'config') ?? DEFAULT_CONFIG_NAME);
   return loadConfig(configPath);
@@ -744,6 +789,7 @@ Commands:
   run --plan <id>                     Execute an approved plan in Playwright
   report --run <id>                   Regenerate an HTML report
   status                              Show inventory and coverage summary
+  auth [--role <id>]                  Authenticate a configured role and save storage state
 
 Common options:
   --config <path>                     Config path (default: ai-web-test.config.json)
