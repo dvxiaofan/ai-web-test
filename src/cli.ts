@@ -241,7 +241,6 @@ async function commandPlan(args: ReturnType<typeof parseCliArgs>, output: CliOut
   });
   await store.writePlan(proposed.plan, 'proposed');
   output.result({
-    ok: proposed.validation.valid,
     planPath: store.planPath(proposed.plan.id, 'proposed'),
     plan: {
       id: proposed.plan.id,
@@ -377,7 +376,7 @@ async function commandRun(args: ReturnType<typeof parseCliArgs>, output: CliOutp
   const reportModel = reportModelFromRun(result, plan, scenarios);
   const reportPath = store.runWorkspace(result.id).report;
   await writeHtmlReport(reportModel, reportPath);
-  output.result({ ok: result.status === 'passed', status: result.status, runId: result.id, resultPath, reportPath, coverage: result.coverage });
+  output.result({ status: result.status, runId: result.id, resultPath, reportPath, coverage: result.coverage });
   if (runResultExitCode(result.status) !== 0) process.exitCode = runResultExitCode(result.status);
 }
 

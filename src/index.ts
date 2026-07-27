@@ -1,4 +1,5 @@
 export * from './core/index.js';
+export * from './agent/index.js';
 export * from './discovery/index.js';
 export * from './planning/index.js';
 export * from './execution/index.js';
