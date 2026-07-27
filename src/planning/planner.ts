@@ -1,7 +1,9 @@
 import { stableId } from "../core/ids.js";
-import type { BrowserProfile, RunPlan, TestScenario } from "../core/types.js";
+import type { BrowserProfile, Inventory, RunPlan, TestScenario } from "../core/types.js";
 import { computeInventoryDigest, computePlanDigest, computeScenarioDigest, validatePlan } from "./approval.js";
 import { selectScenarios } from "./selectors.js";
+import { computeBusinessGaps, computeBusinessCoverage } from "../business/gaps.js";
+import type { BusinessInventory } from "../business/types.js";
 import type { ProposedPlanResult, ProposePlanInput } from "./types.js";
 
 export function proposePlan(input: ProposePlanInput): ProposedPlanResult {
@@ -30,7 +32,7 @@ export function proposePlan(input: ProposePlanInput): ProposedPlanResult {
     policy: clonePolicy(input.policy),
     createdAt: now,
     ...(input.createdBy === undefined || input.createdBy.trim().length === 0 ? {} : { createdBy: input.createdBy.trim() }),
-    notes: buildPlanNotes(selection),
+    notes: buildPlanNotes(selection, input.businessInventory, input.inventory),
     digest: "pending",
   };
   const plan: RunPlan = { ...planWithoutDigest, digest: "" };
@@ -61,7 +63,11 @@ function defaultPlanName(scope: ProposePlanInput["scope"], count: number): strin
   return `${label} test plan (${count} scenario${count === 1 ? "" : "s"})`;
 }
 
-function buildPlanNotes(selection: ProposedPlanResult["selection"]): string[] {
+function buildPlanNotes(
+  selection: ProposedPlanResult["selection"],
+  businessInventory: BusinessInventory | undefined,
+  inventory: Inventory,
+): string[] {
   const notes: string[] = [];
   if (selection.autoIncludedScenarioIds.length > 0) {
     notes.push(`Automatically included ${selection.autoIncludedScenarioIds.length} prerequisite scenario(s).`);
@@ -74,6 +80,14 @@ function buildPlanNotes(selection: ProposedPlanResult["selection"]): string[] {
   }
   if (selection.dependencyCycles.length > 0) {
     notes.push(`Dependency cycles detected: ${selection.dependencyCycles.map((cycle) => cycle.join(" → ")).join("; ")}.`);
+  }
+  if (businessInventory) {
+    const gaps = computeBusinessGaps(inventory, businessInventory);
+    const coverage = computeBusinessCoverage(inventory, businessInventory);
+    const pct = (coverage.summary.coverageRatio * 100).toFixed(0);
+    notes.push(
+      `Business coverage: ${pct}% (${coverage.summary.coveredActions}/${coverage.summary.actions} actions covered by rules+permissions), ${gaps.length} business gap(s) found.`,
+    );
   }
   return notes;
 }

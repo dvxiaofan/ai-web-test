@@ -1,5 +1,7 @@
 import type { Inventory, InventoryNode, TestScenario } from "../core/types.js";
+import type { BusinessInventory } from "../business/types.js";
 import { computeCoverage } from "./coverage.js";
+import { computeBusinessGaps, computeBusinessCoverage } from "../business/gaps.js";
 import { summarizeInventory } from "./summary.js";
 
 /**
@@ -11,7 +13,7 @@ import { summarizeInventory } from "./summary.js";
  * plan's `inventory_query` capability.
  */
 
-export type InventoryQueryAction = "summary" | "modules" | "module" | "page" | "relationships" | "gaps";
+export type InventoryQueryAction = "summary" | "modules" | "module" | "page" | "relationships" | "gaps" | "business";
 
 export interface InventoryQuery {
   action: InventoryQueryAction;
@@ -21,7 +23,11 @@ export interface InventoryQuery {
   scenarios?: readonly TestScenario[];
 }
 
-export function queryInventory(query: InventoryQuery, inventory: Inventory): unknown {
+export interface InventoryQueryOptions {
+  businessInventory?: BusinessInventory;
+}
+
+export function queryInventory(query: InventoryQuery, inventory: Inventory, options: InventoryQueryOptions = {}): unknown {
   switch (query.action) {
     case "summary": {
       const scenarios = query.scenarios;
@@ -41,6 +47,15 @@ export function queryInventory(query: InventoryQuery, inventory: Inventory): unk
       return { edges: inventory.edges };
     case "gaps":
       return { gaps: computeCoverage(inventory, query.scenarios ?? []).gaps };
+    case "business": {
+      if (!options.businessInventory) {
+        throw new TypeError("The 'business' query requires a businessInventory option.");
+      }
+      return {
+        coverage: computeBusinessCoverage(inventory, options.businessInventory),
+        gaps: computeBusinessGaps(inventory, options.businessInventory),
+      };
+    }
     default:
       throw new TypeError(`Unknown inventory query action: ${(query as InventoryQuery).action}`);
   }

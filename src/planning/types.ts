@@ -8,6 +8,7 @@ import type {
   TestPolicy,
   TestScenario,
 } from "../core/types.js";
+import type { BusinessInventory } from "../business/types.js";
 
 export interface ScenarioSelectionOptions {
   /** Scenario IDs from a referenced failed run (used by `failed` scope). */
@@ -46,6 +47,7 @@ export interface ProposePlanInput {
   createdBy?: string;
   now?: Date | string;
   selection?: ScenarioSelectionOptions;
+  businessInventory?: BusinessInventory;
 }
 
 export interface ProposedPlanResult {

@@ -20,6 +20,8 @@ export interface ReportTestResult {
   observations?: string[];
 }
 
+import type { BusinessCoverageReport } from "../business/types.js";
+
 export interface HtmlReportModel {
   projectName: string;
   runId: string;
@@ -38,4 +40,5 @@ export interface HtmlReportModel {
   results: ReportTestResult[];
   warnings: string[];
   uncovered: string[];
+  business?: BusinessCoverageReport;
 }
