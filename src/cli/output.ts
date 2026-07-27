@@ -1,8 +1,15 @@
-import { buildErrorEnvelope, buildSuccessEnvelope, normalizeAgentError } from "../agent/index.js";
+import { buildErrorEnvelope, buildSuccessEnvelope, deriveNextActions, normalizeAgentError, type AgentState } from "../agent/index.js";
 
 export interface CliOutputOptions {
   json: boolean;
   quiet: boolean;
+  projectId?: string;
+  operationId?: string;
+}
+
+export interface CliOutputContext {
+  projectId?: string;
+  planId?: string;
 }
 
 /**
@@ -17,10 +24,21 @@ export class CliOutput {
   #json: boolean;
   #quiet: boolean;
   #warnings: string[] = [];
+  #projectId: string | undefined;
+  #planId: string | undefined;
+  #operationId: string | undefined;
 
   constructor(options: CliOutputOptions) {
     this.#json = options.json;
     this.#quiet = options.quiet;
+    this.#projectId = options.projectId;
+    this.#operationId = options.operationId;
+  }
+
+  /** Enrich the envelope context (project/plan identity) discovered mid-command. */
+  setContext(context: CliOutputContext): void {
+    if (context.projectId) this.#projectId = context.projectId;
+    if (context.planId) this.#planId = context.planId;
   }
 
   info(message: string): void {
@@ -38,10 +56,18 @@ export class CliOutput {
     process.stderr.write(`warn: ${message}\n`);
   }
 
-  result(value: unknown): void {
+  result(value: unknown, state?: AgentState): void {
     if (this.#json) {
       const envelope = buildSuccessEnvelope(value as Record<string, unknown>, this.#warnings);
       this.#warnings = [];
+      if (state) envelope.state = state;
+      const ctx: { projectId?: string; planId?: string } = {};
+      if (this.#projectId) ctx.projectId = this.#projectId;
+      if (this.#planId) ctx.planId = this.#planId;
+      envelope.nextActions = deriveNextActions(state, ctx);
+      if (this.#projectId) envelope.projectId = this.#projectId;
+      if (this.#planId) envelope.planId = this.#planId;
+      if (this.#operationId) envelope.operationId = this.#operationId;
       process.stdout.write(`${JSON.stringify(envelope)}\n`);
       return;
     }

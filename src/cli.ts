@@ -20,6 +20,7 @@ import {
   type RunScope,
   type TestScenario,
 } from './core/index.js';
+import { deriveProjectId, generateOperationId, AgentError, type AgentState } from './agent/index.js';
 import { discoverSource } from './discovery/index.js';
 import { exploreBrowser } from './browser/index.js';
 import { mergeBrowserExploration, summarizeInventory } from './inventory/index.js';
@@ -44,6 +45,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const output = new CliOutput({
     json: getBooleanOption(args, 'json'),
     quiet: getBooleanOption(args, 'quiet'),
+    operationId: generateOperationId(),
   });
 
   try {
@@ -84,7 +86,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     }
   } catch (error) {
     if (error instanceof ConfigValidationError) {
-      output.error(`${error.message}\n${error.issues.map((issue) => `- ${issue.path}: ${issue.message}`).join('\n')}`);
+      output.error(new AgentError('CONFIG_VALIDATION', `${error.message}\n${error.issues.map((issue) => `- ${issue.path}: ${issue.message}`).join('\n')}`, false));
     } else {
       output.error(error);
     }
@@ -126,19 +128,20 @@ async function commandInit(args: ReturnType<typeof parseCliArgs>, output: CliOut
   };
   await writeJsonFile(configPath, config);
   const relativeConfig = path.relative(cwd, configPath);
+  output.setContext({ projectId: deriveProjectId({ baseUrl, rootDir: targetRoot }) });
   output.result({
-    ok: true,
     configPath,
     targetRoot,
     next: [
       `aitest discover --config ${relativeConfig} --static-only`,
       `aitest discover --config ${relativeConfig} --start`,
     ],
-  });
+  }, 'initialized');
 }
 
 async function commandDiscover(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
   const config = await readConfig(args);
+  output.setContext({ projectId: deriveProjectId(config.target) });
   const store = new ArtifactStore(config.artifacts.directory);
   await store.initialize();
   output.info(`Analyzing source: ${config.target.rootDir}`);
@@ -194,11 +197,12 @@ async function commandDiscover(args: ReturnType<typeof parseCliArgs>, output: Cl
   await writeScenarios(store.resolve('scenarios.json'), scenarios);
 
   const summary = summarizeInventory(inventory, scenarios);
-  output.result({ ok: true, inventoryPath: store.layout.inventory, scenariosPath: store.resolve('scenarios.json'), runtimeStatus, summary });
+  output.result({ inventoryPath: store.layout.inventory, scenariosPath: store.resolve('scenarios.json'), runtimeStatus, summary }, 'discovered');
 }
 
 async function commandPlan(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
   const config = await readConfig(args);
+  output.setContext({ projectId: deriveProjectId(config.target) });
   const store = new ArtifactStore(config.artifacts.directory);
   const inventory = await store.readInventory();
   const scenarios = await readScenarioCatalog(store, inventory, config.policy.allowSecretPersistence);
@@ -240,6 +244,7 @@ async function commandPlan(args: ReturnType<typeof parseCliArgs>, output: CliOut
     ...(failedScenarioIds ? { selection: { failedScenarioIds } } : {}),
   });
   await store.writePlan(proposed.plan, 'proposed');
+  output.setContext({ planId: proposed.plan.id });
   output.result({
     planPath: store.planPath(proposed.plan.id, 'proposed'),
     plan: {
@@ -256,11 +261,12 @@ async function commandPlan(args: ReturnType<typeof parseCliArgs>, output: CliOut
     },
     validation: proposed.validation,
     next: proposed.validation.valid ? [`aitest approve --plan ${proposed.plan.id}`] : [],
-  });
+  }, 'plan_proposed');
 }
 
 async function commandAiPlan(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
   const config = await readConfig(args);
+  output.setContext({ projectId: deriveProjectId(config.target) });
   const store = new ArtifactStore(config.artifacts.directory);
   const inventory = await store.readInventory();
   const scenarios = await readScenarioCatalog(store, inventory, config.policy.allowSecretPersistence);
@@ -296,11 +302,12 @@ async function commandAiPlan(args: ReturnType<typeof parseCliArgs>, output: CliO
     response,
     note: 'AI proposals are advisory. Review and convert approved scenarios into a run plan before execution.',
   });
-  output.result({ ok: true, outputPath, scenarioProposals: response.scenarios.length, coverageGaps: response.coverageGaps, questionsForOperator: response.questionsForOperator });
+  output.result({ outputPath, scenarioProposals: response.scenarios.length, coverageGaps: response.coverageGaps, questionsForOperator: response.questionsForOperator }, 'discovered');
 }
 
 async function commandApprove(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
   const config = await readConfig(args);
+  output.setContext({ projectId: deriveProjectId(config.target) });
   const store = new ArtifactStore(config.artifacts.directory);
   const inventory = await store.readInventory();
   const scenarios = await readScenarioCatalog(store, inventory, config.policy.allowSecretPersistence);
@@ -326,11 +333,13 @@ async function commandApprove(args: ReturnType<typeof parseCliArgs>, output: Cli
   };
   const approved = approvePlan(proposed, approvalInput, { inventory, scenarios });
   await store.writePlan(approved, 'approved');
-  output.result({ ok: true, approvedPlanPath: store.planPath(approved.id, 'approved'), planId: approved.id, status: approved.status, approval: approved.approval });
+  output.setContext({ planId: approved.id });
+  output.result({ approvedPlanPath: store.planPath(approved.id, 'approved'), planId: approved.id, status: approved.status, approval: approved.approval }, 'plan_approved');
 }
 
 async function commandRun(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
   const config = await readConfig(args);
+  output.setContext({ projectId: deriveProjectId(config.target) });
   const store = new ArtifactStore(config.artifacts.directory);
   await store.initialize();
   const inventory = await store.readInventory();
@@ -376,12 +385,15 @@ async function commandRun(args: ReturnType<typeof parseCliArgs>, output: CliOutp
   const reportModel = reportModelFromRun(result, plan, scenarios);
   const reportPath = store.runWorkspace(result.id).report;
   await writeHtmlReport(reportModel, reportPath);
-  output.result({ status: result.status, runId: result.id, resultPath, reportPath, coverage: result.coverage });
+  output.setContext({ planId: plan.id });
+  const finalState: AgentState = result.status === 'passed' ? 'completed' : 'failed';
+  output.result({ status: result.status, runId: result.id, resultPath, reportPath, coverage: result.coverage }, finalState);
   if (runResultExitCode(result.status) !== 0) process.exitCode = runResultExitCode(result.status);
 }
 
 async function commandReport(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
   const config = await readConfig(args);
+  output.setContext({ projectId: deriveProjectId(config.target) });
   const store = new ArtifactStore(config.artifacts.directory);
   const runId = getStringOption(args, 'run') ?? args.positionals[0];
   if (!runId) throw new Error('Specify a run id with --run.');
@@ -390,11 +402,12 @@ async function commandReport(args: ReturnType<typeof parseCliArgs>, output: CliO
   const model = reportModelFromRun(result, plan, await readScenarioCatalog(store, await store.readInventory(), config.policy.allowSecretPersistence));
   const target = getStringOption(args, 'output') ?? store.runWorkspace(runId).report;
   await writeHtmlReport(model, target);
-  output.result({ ok: true, reportPath: target, runId });
+  output.result({ reportPath: target, runId }, 'completed');
 }
 
 async function commandAnalyze(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
   const config = await readConfig(args);
+  output.setContext({ projectId: deriveProjectId(config.target) });
   const store = new ArtifactStore(config.artifacts.directory);
   const runId = getStringOption(args, 'run') ?? args.positionals[0];
   if (!runId) throw new Error('Specify a run id with --run.');
@@ -425,15 +438,16 @@ async function commandAnalyze(args: ReturnType<typeof parseCliArgs>, output: Cli
     triage.push({ scenarioId: scenario.scenarioId, analysis });
   }
   const outputPath = await store.writeJson(`runs/${runId}/ai-triage.json`, { runId, generatedAt: new Date().toISOString(), triage });
-  output.result({ ok: true, outputPath, analyzed: triage.length });
+  output.result({ outputPath, analyzed: triage.length });
 }
 
 async function commandStatus(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
   const config = await readConfig(args);
+  output.setContext({ projectId: deriveProjectId(config.target) });
   const store = new ArtifactStore(config.artifacts.directory);
   const inventory = await store.readInventory();
   const scenarios = await readScenarioCatalog(store, inventory, config.policy.allowSecretPersistence);
-  output.result({ ok: true, inventory: summarizeInventory(inventory, scenarios), artifacts: store.layout });
+  output.result({ inventory: summarizeInventory(inventory, scenarios), artifacts: store.layout });
 }
 
 async function readConfig(args: ReturnType<typeof parseCliArgs>): Promise<ProjectConfig> {
