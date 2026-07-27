@@ -5,3 +5,5 @@ export * from "./permission-model.js";
 export * from "./state-model.js";
 export * from "./module-builder.js";
 export * from "./assemble.js";
+export * from "./gaps.js";
+export * from "./questions.js";
