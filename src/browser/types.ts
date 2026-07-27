@@ -1,4 +1,5 @@
 import type { ActionRisk, BrowserName, JsonObject } from "../core/types.js";
+import type { PageRegion } from "./regions.js";
 
 export type BrowserExplorationStatus = "completed" | "partial" | "unavailable";
 
@@ -51,6 +52,7 @@ export interface DiscoveredLink {
   riskReason: string;
   followed: boolean;
   skipReason?: string;
+  region?: PageRegion;
 }
 
 export interface DiscoveredControl {
@@ -61,6 +63,7 @@ export interface DiscoveredControl {
   title?: string;
   risk: ActionRisk;
   riskReason: string;
+  region?: PageRegion;
 }
 
 export interface ConsoleObservation {
@@ -117,6 +120,8 @@ export interface BrowserPageObservation {
   screenshotPath?: string;
   error?: string;
   durationMs: number;
+  menus?: { label: string; region: PageRegion; source: "control" | "link" }[];
+  roles?: string[];
 }
 
 export interface SkippedBrowserTarget {

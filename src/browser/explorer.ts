@@ -13,6 +13,9 @@ import type {
 import { stableId } from "../core/ids.js";
 import { evaluateUrlAccess } from "./host-policy.js";
 import { classifyActionRisk } from "./risk.js";
+import { classifyRegion } from "./regions.js";
+import { findMenuCandidates } from "./menu-explorer.js";
+import { inferRolesFromObservation } from "./role-explorer.js";
 import type {
   BrowserExplorationOptions,
   BrowserExplorationResult,
@@ -71,6 +74,7 @@ interface RawLink {
   target: string;
   ariaLabel: string;
   title: string;
+  role: string;
 }
 
 interface RawControl {
@@ -79,6 +83,7 @@ interface RawControl {
   text: string;
   ariaLabel: string;
   title: string;
+  role: string;
 }
 
 interface PageDiscovery {
@@ -279,6 +284,10 @@ async function observePage(
   if (response !== null) result.httpStatus = response.status();
   if (screenshotPath !== undefined) result.screenshotPath = screenshotPath;
   if (pageError !== undefined) result.error = pageError;
+  const menus = findMenuCandidates(controls, links);
+  const roles = inferRolesFromObservation(controls, links);
+  if (menus.length > 0) result.menus = menus;
+  if (roles.length > 0) result.roles = roles;
   return { observation: result, links, rawLinkUrls };
 }
 
@@ -410,6 +419,7 @@ async function discoverLinks(page: Page, options: NormalizedOptions): Promise<Pa
         target: anchor.target,
         ariaLabel: anchor.getAttribute("aria-label") ?? "",
         title: anchor.getAttribute("title") ?? "",
+        role: anchor.getAttribute("role") ?? "",
       };
     });
   }) as RawLink[];
@@ -445,13 +455,14 @@ async function discoverControls(page: Page): Promise<DiscoveredControl[]> {
       return elements.map((element) => {
         const htmlElement = element as HTMLElement;
         const input = element instanceof HTMLInputElement ? element : undefined;
-        return {
-          tagName: element.tagName.toLowerCase(),
-          type: input?.type ?? element.getAttribute("type") ?? "",
-          text: (input?.value || htmlElement.innerText || element.textContent || "").trim(),
-          ariaLabel: element.getAttribute("aria-label") ?? "",
-          title: element.getAttribute("title") ?? "",
-        };
+      return {
+        tagName: element.tagName.toLowerCase(),
+        type: input?.type ?? element.getAttribute("type") ?? "",
+        text: (input?.value || htmlElement.innerText || element.textContent || "").trim(),
+        ariaLabel: element.getAttribute("aria-label") ?? "",
+        title: element.getAttribute("title") ?? "",
+        role: element.getAttribute("role") ?? "",
+      };
       });
     }) as RawControl[];
 
@@ -468,6 +479,16 @@ async function discoverControls(page: Page): Promise<DiscoveredControl[]> {
       text: redactText(control.text).slice(0, 500),
       risk: classification.risk,
       riskReason: classification.reason,
+      region: classifyRegion({
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+        role: control.role,
+        ariaLabel: control.ariaLabel,
+        text: control.text,
+        tagName: control.tagName,
+      }),
     };
     if (control.type.length > 0) discovered.type = control.type;
     if (control.ariaLabel.length > 0) discovered.ariaLabel = redactText(control.ariaLabel);
