@@ -10,18 +10,23 @@ jobs:
   web-test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # E2E fixture exercises AI scenario planning, so the provider key must be present.
+      CODEBUDDY_API_KEY: ${{ secrets.CODEBUDDY_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
-      # This repository workflow validates the reusable tool itself. A target
-      # project's workflow should add its own app startup and approved plan.
-      # Use npm ci after committing the generated package-lock.json; install is
-      # kept here so the initial template also works before that lockfile exists.
-      - run: npm install
+          # Pin Node via .nvmrc (committed in Batch 0.1) for reproducible installs.
+          node-version-file: .nvmrc
+      - run: npm ci
       - run: npm run typecheck
-      - run: npm test
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run tests (unit + Chromium fixture E2E)
+        env:
+          AI_WEB_TEST_E2E: "1"
+        run: npm test
       - run: npm run build
       - uses: actions/upload-artifact@v4
         if: always()
@@ -30,3 +35,5 @@ jobs:
           path: |
             coverage/
             test-results/
+            .ai-web-test/
+            .tmp-e2e-runs/

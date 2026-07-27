@@ -28,6 +28,9 @@ vitest.check.config.mjs
 .env
 .env.*
 !.env.example
+# .nvmrc pins the Node version for reproducible installs; override the global
+# gitignore rule that ignores it so the pin is version-controlled.
+!.nvmrc
 *.secret
 *.secrets
 *.pem
@@ -51,3 +54,6 @@ vitest.check.config.mjs
 .DS_Store
 .idea/
 .vscode/
+
+# Temporary exploration scripts (Phase 0 cleanup)
+probe-*.mjs
