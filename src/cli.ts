@@ -27,7 +27,7 @@ import { mergeBrowserExploration, summarizeInventory } from './inventory/index.j
 import { approvePlan, proposePlan, validateApprovedPlan } from './planning/index.js';
 import { generateRouteSmokeScenarios, loadScenarios, writeScenarios } from './scenarios/index.js';
 import { executePlan } from './execution/index.js';
-import { writeHtmlReport, type HtmlReportModel } from './reporting/index.js';
+import { writeHtmlReport, writeMarkdownReport, type HtmlReportModel } from './reporting/index.js';
 import { getBooleanOption, getListOption, getStringOption, parseCliArgs, CliOutput, withPrompt } from './cli/index.js';
 import { collectSourceExcerpts, createAiProvider, proposeScenariosWithAi, triageFailureWithAi } from './ai/index.js';
 import { withTargetProcess } from './runtime/index.js';
@@ -385,9 +385,11 @@ async function commandRun(args: ReturnType<typeof parseCliArgs>, output: CliOutp
   const reportModel = reportModelFromRun(result, plan, scenarios);
   const reportPath = store.runWorkspace(result.id).report;
   await writeHtmlReport(reportModel, reportPath);
+  const markdownPath = store.runWorkspace(result.id).markdown;
+  await writeMarkdownReport(reportModel, markdownPath);
   output.setContext({ planId: plan.id });
   const finalState: AgentState = result.status === 'passed' ? 'completed' : 'failed';
-  output.result({ status: result.status, runId: result.id, resultPath, reportPath, coverage: result.coverage }, finalState);
+  output.result({ status: result.status, runId: result.id, resultPath, reportPath, markdownPath, coverage: result.coverage }, finalState);
   if (runResultExitCode(result.status) !== 0) process.exitCode = runResultExitCode(result.status);
 }
 
@@ -402,7 +404,9 @@ async function commandReport(args: ReturnType<typeof parseCliArgs>, output: CliO
   const model = reportModelFromRun(result, plan, await readScenarioCatalog(store, await store.readInventory(), config.policy.allowSecretPersistence));
   const target = getStringOption(args, 'output') ?? store.runWorkspace(runId).report;
   await writeHtmlReport(model, target);
-  output.result({ reportPath: target, runId }, 'completed');
+  const markdownTarget = target.replace(/\.html$/i, '.md');
+  await writeMarkdownReport(model, markdownTarget);
+  output.result({ reportPath: target, markdownPath: markdownTarget, runId }, 'completed');
 }
 
 async function commandAnalyze(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {

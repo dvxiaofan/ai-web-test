@@ -1,6 +1,22 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { zhCN } from './zh-CN.js';
 import type { HtmlReportModel, ReportTestResult } from './types.js';
+
+function zhStatus(status: string): string {
+  switch (status) {
+    case 'passed':
+      return zhCN.statusPassed;
+    case 'failed':
+      return zhCN.statusFailed;
+    case 'blocked':
+      return zhCN.statusBlocked;
+    case 'warning':
+      return zhCN.statusWarning;
+    default:
+      return zhCN.statusSkipped;
+  }
+}
 
 export async function writeHtmlReport(model: HtmlReportModel, outputPath: string): Promise<void> {
   await mkdir(path.dirname(outputPath), { recursive: true });
@@ -13,11 +29,11 @@ export function renderHtmlReport(model: HtmlReportModel): string {
   const json = escapeHtml(JSON.stringify(model, null, 2));
 
   return `<!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>${escapeHtml(model.projectName)} — AI Web Test report</title>
+  <title>${escapeHtml(model.projectName)} · ${escapeHtml(zhCN.reportTitleSuffix)}</title>
   <style>
     :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #172033; background: #f5f7fb; }
     body { margin: 0; }
@@ -43,33 +59,33 @@ export function renderHtmlReport(model: HtmlReportModel): string {
 </head>
 <body><main>
   <section class="hero">
-    <p class="muted">AI Web Test · ${escapeHtml(model.runId)}</p>
+    <p class="muted">${escapeHtml(zhCN.productName)} · ${escapeHtml(model.runId)}</p>
     <h1>${escapeHtml(model.projectName)}</h1>
-    <p><span class="pill ${status}">${status.toUpperCase()}</span> ${total} tests · plan ${escapeHtml(model.planId)}</p>
+    <p><span class="pill ${status}">${zhStatus(status)}</span> ${total} ${zhCN.unitTest} · ${zhCN.labelPlanId} ${escapeHtml(model.planId)}</p>
     <p class="muted">${escapeHtml(model.startedAt)} → ${escapeHtml(model.finishedAt)}${model.environment ? ` · ${escapeHtml(model.environment)}` : ''}</p>
   </section>
 
   <section class="grid">
-    ${metric('Passed', model.summary.passed, 'passed')}
-    ${metric('Failed', model.summary.failed, 'failed')}
-    ${metric('Skipped', model.summary.skipped, 'skipped')}
-    ${metric('Blocked', model.summary.blocked, 'blocked')}
+    ${metric(zhCN.metricPassed, model.summary.passed, 'passed')}
+    ${metric(zhCN.metricFailed, model.summary.failed, 'failed')}
+    ${metric(zhCN.metricSkipped, model.summary.skipped, 'skipped')}
+    ${metric(zhCN.metricBlocked, model.summary.blocked, 'blocked')}
   </section>
 
-  <section class="card"><h2>Coverage</h2>
-    <table><thead><tr><th>Dimension</th><th>Covered</th><th>Discovered</th><th>Blocked</th><th>Rate</th></tr></thead>
+  <section class="card"><h2>${escapeHtml(zhCN.sectionCoverage)}</h2>
+    <table><thead><tr><th>${zhCN.colDimension}</th><th>${zhCN.colCovered}</th><th>${zhCN.colDiscovered}</th><th>${zhCN.colBlocked}</th><th>${zhCN.colRate}</th></tr></thead>
     <tbody>${model.coverage.map(coverageRow).join('')}</tbody></table>
   </section>
 
-  <section class="card"><h2>Test results</h2>
-    <table><thead><tr><th>Status</th><th>Test</th><th>Context</th><th>Duration</th><th>Evidence</th></tr></thead>
+  <section class="card"><h2>${escapeHtml(zhCN.sectionTestResults)}</h2>
+    <table><thead><tr><th>${zhCN.colStatus}</th><th>${zhCN.colTest}</th><th>${zhCN.colContext}</th><th>${zhCN.colDuration}</th><th>${zhCN.colEvidence}</th></tr></thead>
     <tbody>${model.results.map(resultRow).join('')}</tbody></table>
   </section>
 
-  ${listSection('Warnings', model.warnings)}
-  ${listSection('Uncovered or blocked inventory', model.uncovered)}
+  ${listSection(zhCN.sectionWarnings, model.warnings)}
+  ${listSection(zhCN.sectionUncovered, model.uncovered)}
 
-  <section class="card"><details><summary>Machine-readable report payload</summary><pre>${json}</pre></details></section>
+  <section class="card"><details><summary>${escapeHtml(zhCN.sectionPayload)}</summary><pre>${json}</pre></details></section>
 </main></body></html>`;
 }
 
@@ -85,11 +101,11 @@ function coverageRow(item: HtmlReportModel['coverage'][number]): string {
 function resultRow(result: ReportTestResult): string {
   const context = [result.module, result.route, result.role].filter(Boolean).join(' · ');
   const links = [
-    result.screenshot ? `<a href="${escapeAttribute(result.screenshot)}">screenshot</a>` : '',
-    result.trace ? `<a href="${escapeAttribute(result.trace)}">trace</a>` : '',
+    result.screenshot ? `<a href="${escapeAttribute(result.screenshot)}">${zhCN.linkScreenshot}</a>` : '',
+    result.trace ? `<a href="${escapeAttribute(result.trace)}">${zhCN.linkTrace}</a>` : '',
   ].filter(Boolean).join(' · ');
   const details = [result.error, ...(result.observations ?? [])].filter(Boolean).map((text) => escapeHtml(text ?? '')).join('<br>');
-  return `<tr><td><span class="pill ${result.status}">${result.status}</span></td><td><strong>${escapeHtml(result.name)}</strong>${details ? `<br><small>${details}</small>` : ''}</td><td>${escapeHtml(context)}</td><td>${result.durationMs === undefined ? '—' : `${result.durationMs} ms`}</td><td>${links || '—'}</td></tr>`;
+  return `<tr><td><span class="pill ${result.status}">${zhStatus(result.status)}</span></td><td><strong>${escapeHtml(result.name)}</strong>${details ? `<br><small>${details}</small>` : ''}</td><td>${escapeHtml(context)}</td><td>${result.durationMs === undefined ? '—' : `${result.durationMs} ms`}</td><td>${links || '—'}</td></tr>`;
 }
 
 function listSection(title: string, items: string[]): string {

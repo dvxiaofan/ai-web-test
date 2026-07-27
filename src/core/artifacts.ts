@@ -17,6 +17,7 @@ export interface RunArtifactWorkspace {
   root: string;
   result: string;
   report: string;
+  markdown: string;
   screenshots: string;
   traces: string;
   videos: string;
@@ -89,6 +90,7 @@ export class ArtifactStore {
       root,
       result: path.join(root, "result.json"),
       report: path.join(root, "report.html"),
+      markdown: path.join(root, "report.md"),
       screenshots: path.join(root, "screenshots"),
       traces: path.join(root, "traces"),
       videos: path.join(root, "videos"),
