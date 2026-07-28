@@ -28,6 +28,7 @@ import {
   type RequestAccessDecision,
 } from '../browser/host-policy.js';
 import { compareValues } from './assertion-runner.js';
+import { toEvidenceRefs } from './evidence-collector.js';
 import { computePlanDigest, computeScenarioDigest } from '../planning/approval.js';
 import { compareOrCreateVisualSnapshot } from './visual.js';
 
@@ -232,6 +233,7 @@ async function executeScenario(
 
   const stepResults: StepResult[] = [];
   let scenarioError: Error | undefined;
+  let cleanupFailed = false;
   try {
     for (const step of scenario.steps) {
       activeStepRisk.risk = step.risk;
@@ -259,6 +261,11 @@ async function executeScenario(
         stepResult.error = serializeError(error);
       }
       stepResults.push(stepResult);
+      // A failed teardown/cleanup step is reported separately so data-isolation
+      // regressions are visible even when the scenario body passed.
+      if (step.metadata && (step.metadata as Record<string, unknown>).cleanup === true && stepResult.status !== 'passed') {
+        cleanupFailed = true;
+      }
       options.onProgress?.({ type: 'step-finished', scenarioId: scenario.id, stepId: step.id, status: stepResult.status });
       if (stepResult.status === 'failed' || stepResult.status === 'error' || stepResult.status === 'blocked') {
         scenarioError = stepResult.error ? new Error(stepResult.error.message) : new Error(`Step ${step.id} failed.`);
@@ -313,6 +320,10 @@ async function executeScenario(
       pageErrors: runtimeEvidence.pageErrors,
       failedRequests: runtimeEvidence.failedRequests,
       visitedUrls: runtimeEvidence.visitedUrls,
+      ...(cleanupFailed ? { cleanupFailed: true } : {}),
+      ...(scenario.metadata && (scenario.metadata as Record<string, unknown>).collectEvidence === true
+        ? { evidence: toEvidenceRefs(runtimeEvidence) }
+        : {}),
     },
   };
 }
@@ -943,6 +954,15 @@ function buildExecutionFindings(runId: string, results: readonly ScenarioResult[
   };
 
   for (const result of results) {
+    if (result.metadata && (result.metadata as Record<string, unknown>).cleanupFailed === true) {
+      add(
+        result,
+        'environment',
+        'high',
+        `Teardown failed in ${result.scenarioId}`,
+        'A cleanup/teardown step failed after the scenario body. This may leave test data behind; verify isolation and re-run.',
+      );
+    }
     for (const message of metadataStrings(result.metadata?.pageErrors).slice(0, 20)) {
       add(result, 'defect', 'high', `Page error in ${result.scenarioId}`, message);
     }

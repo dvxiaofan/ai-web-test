@@ -102,7 +102,7 @@ export function adaptControlledSpecToScenario(spec: ControlledSpec): TestScenari
     evidence: [] as TestScenario['evidence'],
     createdAt: spec.createdAt,
     ...(spec.description !== undefined ? { description: spec.description } : {}),
-    metadata: { controlled: true, specId: spec.id },
+    metadata: { controlled: true, specId: spec.id, collectEvidence: true },
     steps: mapped,
   };
 
