@@ -38,6 +38,13 @@ import {
   type HtmlReportModel,
 } from '../reporting/index.js';
 import { withTargetProcess, type TargetProcessOptions } from '../runtime/index.js';
+import { classifyRunFailures } from '../healing/classifier.js';
+import { diffScenarios } from '../healing/semantic-diff.js';
+import { evaluateHealingChanges } from '../healing/policy.js';
+import { createHealingProposal } from '../healing/proposal.js';
+import { loadTrendReport, type TrendReport } from '../history/trends.js';
+import { applyRetentionPolicy, type RetentionPolicy, type RetentionReport } from '../history/retention.js';
+import type { FailureClassification, HealingProposal } from '../healing/types.js';
 
 /**
  * Phase 5C — orchestration service for the MCP server.
@@ -586,6 +593,85 @@ export class McpService {
     const scenarios = mergeScenarioCatalog(existing, generated);
     await writeScenarios(store.resolve('scenarios.json'), scenarios);
     return { count: scenarios.length, path: store.resolve('scenarios.json') };
+  }
+
+  // --- healing + history (Phase 6) --------------------------------------
+
+  /**
+   * Classify the failures of a run into deterministic categories with evidence.
+   * Pure / read-only: reads the run result from the artifact store.
+   */
+  async healingClassify(args: { runId: string }): Promise<{
+    runId: string;
+    classifications: FailureClassification[];
+  }> {
+    const store = await this.store();
+    const result = await store.readRunResult(args.runId);
+    return { runId: args.runId, classifications: classifyRunFailures(result.scenarios) };
+  }
+
+  /**
+   * Review a proposed fix (before -> after scenario) for a failing scenario in a run.
+   * Reuses the run's own failure classification, runs the semantic diff + whitelist
+   * policy, and returns an auditable proposal (auto-applied / requires-approval / forbidden).
+   */
+  async healingReview(args: {
+    runId: string;
+    before: TestScenario;
+    after: TestScenario;
+    changeNote?: string;
+  }): Promise<{
+    proposal: HealingProposal;
+    verdict: HealingProposal['decision']['verdict'];
+    status: HealingProposal['status'];
+  }> {
+    const store = await this.store();
+    const result = await store.readRunResult(args.runId);
+    const classification = classifyRunFailures(result.scenarios).find(
+      (c) => c.scenarioId === args.before.id,
+    );
+    if (!classification) {
+      throw new Error(
+        `No failure classification for scenario ${args.before.id} in run ${args.runId}. ` +
+          'Run awt_healing_classify / `aitest healing --run <id>` first.',
+      );
+    }
+    const diff = diffScenarios(args.before, args.after);
+    const verdict = evaluateHealingChanges(diff.changes).verdict;
+    const proposal = createHealingProposal({
+      runId: args.runId,
+      classification,
+      before: args.before,
+      after: args.after,
+      // Safe, whitelisted changes (verdict = auto-apply) are applied immediately;
+      // meaning-shifting changes are routed through human approval.
+      requireApproval: verdict !== 'auto-apply',
+    });
+    return { proposal, verdict: proposal.decision.verdict, status: proposal.status };
+  }
+
+  /** Build the historical trend report (pass rate / coverage / failure mix / flaky). */
+  async healingTrends(args: { flakyWindow?: number } = {}): Promise<TrendReport> {
+    const store = await this.store();
+    return loadTrendReport(store, args);
+  }
+
+  /** Apply the artifact retention policy to the store (supports dry-run). */
+  async healingRetention(args: {
+    maxRuns?: number;
+    maxAgeDays?: number;
+    pinnedRunIds?: string[];
+    dryRun?: boolean;
+  }): Promise<RetentionReport> {
+    const store = await this.store();
+    const policy: RetentionPolicy = {
+      maxRuns: args.maxRuns,
+      maxAgeDays: args.maxAgeDays,
+      pinnedRunIds: args.pinnedRunIds ?? [],
+    };
+    const retentionOptions: { dryRun?: boolean } = {};
+    if (args.dryRun !== undefined) retentionOptions.dryRun = args.dryRun;
+    return applyRetentionPolicy(store, policy, retentionOptions);
   }
 
   // --- internal helpers ---------------------------------------------------

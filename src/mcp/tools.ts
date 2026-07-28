@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { McpService } from './service.js';
 import { MCP_TOOLS, errorResult, jsonResult } from './protocol.js';
+import type { TestScenario } from '../core/types.js';
 
 /**
  * Register every `awt_*` tool onto an MCP server. Each handler delegates to the
@@ -186,6 +187,104 @@ export function registerMcpTools(server: McpServer, service: McpService): void {
     async () => {
       try {
         return jsonResult(await service.scenariosGenerate());
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    MCP_TOOLS.healingClassify,
+    {
+      description: 'Classify the failures of a run into deterministic categories with evidence (Phase 6 healing).',
+      inputSchema: {
+        runId: z.string().describe('Run id to triage (required).'),
+      },
+    },
+    async (args) => {
+      try {
+        return jsonResult(await service.healingClassify({ runId: args.runId as string }));
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    MCP_TOOLS.healingReview,
+    {
+      description:
+        'Review a proposed fix (before -> after scenario) for a failing scenario; runs semantic diff + whitelist policy and returns an auditable proposal.',
+      inputSchema: {
+        runId: z.string().describe('Run id the failure belongs to (required).'),
+        before: z.object({}).passthrough().describe('Failing scenario before the proposed fix.'),
+        after: z.object({}).passthrough().describe('Proposed fixed scenario.'),
+        changeNote: z.string().optional().describe('Optional human note about the change.'),
+      },
+    },
+    async (args) => {
+      try {
+        const params: {
+          runId: string;
+          before: TestScenario;
+          after: TestScenario;
+          changeNote?: string;
+        } = {
+          runId: args.runId as string,
+          before: args.before as unknown as TestScenario,
+          after: args.after as unknown as TestScenario,
+        };
+        if (typeof args.changeNote === 'string') params.changeNote = args.changeNote;
+        return jsonResult(await service.healingReview(params));
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    MCP_TOOLS.healingTrends,
+    {
+      description: 'Build the historical trend report (pass rate / coverage / failure mix / flaky scenarios).',
+      inputSchema: {
+        flakyWindow: z.number().optional().describe('Window (ms) for flaky detection; defaults to 7 days.'),
+      },
+    },
+    async (args) => {
+      try {
+        const params: { flakyWindow?: number } = {};
+        if (typeof args.flakyWindow === 'number') params.flakyWindow = args.flakyWindow;
+        return jsonResult(await service.healingTrends(params));
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    MCP_TOOLS.healingRetention,
+    {
+      description: 'Apply the artifact retention policy to the store (supports dry-run).',
+      inputSchema: {
+        maxRuns: z.number().optional().describe('Keep at most this many newest runs.'),
+        maxAgeDays: z.number().optional().describe('Remove runs older than this many days.'),
+        pinnedRunIds: z.array(z.string()).optional().describe('Run ids that must never be removed.'),
+        dryRun: z.boolean().optional().describe('Report removals without deleting.'),
+      },
+    },
+    async (args) => {
+      try {
+        const params: {
+          maxRuns?: number;
+          maxAgeDays?: number;
+          pinnedRunIds?: string[];
+          dryRun?: boolean;
+        } = {};
+        if (typeof args.maxRuns === 'number') params.maxRuns = args.maxRuns;
+        if (typeof args.maxAgeDays === 'number') params.maxAgeDays = args.maxAgeDays;
+        if (Array.isArray(args.pinnedRunIds)) params.pinnedRunIds = args.pinnedRunIds;
+        if (typeof args.dryRun === 'boolean') params.dryRun = args.dryRun;
+        return jsonResult(await service.healingRetention(params));
       } catch (error) {
         return errorResult(error);
       }

@@ -97,11 +97,15 @@ describe('MCP server over stdio (in-memory)', () => {
     client.notify('notifications/initialized', {});
   });
 
-  it('lists all nine awt_* tools', async () => {
+  it('lists all awt_* tools', async () => {
     const response = await client.request('tools/list', {});
     const names = response.result.tools.map((tool: any) => tool.name);
-    expect(names).toHaveLength(9);
+    expect(names).toHaveLength(13);
     expect(names.every((name: string) => name.startsWith('awt_'))).toBe(true);
+    expect(names).toContain('awt_healing_classify');
+    expect(names).toContain('awt_healing_review');
+    expect(names).toContain('awt_healing_trends');
+    expect(names).toContain('awt_healing_retention');
   });
 
   it('calls awt_status and returns a JSON status object', async () => {

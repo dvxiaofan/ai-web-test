@@ -28,6 +28,10 @@ export const MCP_TOOLS = {
   report: 'awt_report',
   business: 'awt_business',
   scenariosGenerate: 'awt_scenarios_generate',
+  healingClassify: 'awt_healing_classify',
+  healingReview: 'awt_healing_review',
+  healingTrends: 'awt_healing_trends',
+  healingRetention: 'awt_healing_retention',
 } as const;
 
 export type McpToolName = (typeof MCP_TOOLS)[keyof typeof MCP_TOOLS];

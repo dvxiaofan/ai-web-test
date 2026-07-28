@@ -2,7 +2,7 @@
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readdir, stat } from 'node:fs/promises';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -24,6 +24,12 @@ import { authenticate, saveStorageState } from './auth/index.js';
 import { createBrowserAuthSession } from './browser/auth-surface.js';
 import { discoverSource } from './discovery/index.js';
 import { exploreBrowser } from './browser/index.js';
+import { classifyRunFailures } from './healing/classifier.js';
+import { diffScenarios } from './healing/semantic-diff.js';
+import { evaluateHealingChanges } from './healing/policy.js';
+import { createHealingProposal } from './healing/proposal.js';
+import { loadTrendReport } from './history/trends.js';
+import { applyRetentionPolicy, type RetentionPolicy } from './history/retention.js';
 import { mergeBrowserExploration, summarizeInventory } from './inventory/index.js';
 import { approvePlan, proposePlan, validateApprovedPlan } from './planning/index.js';
 import { generateRouteSmokeScenarios, loadScenarios, writeScenarios } from './scenarios/index.js';
@@ -84,6 +90,15 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         break;
       case 'mcp':
         await commandMcp(args, output);
+        break;
+      case 'healing':
+        await commandHealing(args, output);
+        break;
+      case 'trends':
+        await commandTrends(args, output);
+        break;
+      case 'retention':
+        await commandRetention(args, output);
         break;
       case 'help':
       case '--help':
@@ -741,6 +756,84 @@ async function commandMcp(args: ReturnType<typeof parseCliArgs>, output: CliOutp
   await startMcpServer({ configPath });
 }
 
+function toOptionalNumber(value: string | undefined): number | undefined {
+  if (value === undefined || value === '') return undefined;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+async function commandHealing(
+  args: ReturnType<typeof parseCliArgs>,
+  output: CliOutput,
+): Promise<void> {
+  const config = await readConfig(args);
+  const store = new ArtifactStore(config.artifacts.directory);
+  const runId = getStringOption(args, 'run');
+  const beforePath = getStringOption(args, 'before');
+  const afterPath = getStringOption(args, 'after');
+  if (runId && beforePath && afterPath) {
+    const result = await store.readRunResult(runId);
+    const before = JSON.parse(await readFile(path.resolve(beforePath), 'utf8')) as TestScenario;
+    const after = JSON.parse(await readFile(path.resolve(afterPath), 'utf8')) as TestScenario;
+    const classification = classifyRunFailures(result.scenarios).find((c) => c.scenarioId === before.id);
+    if (!classification) {
+      throw new Error(
+        `No failure classification for scenario ${before.id} in run ${runId}. ` +
+          `Run \`aitest healing --run ${runId}\` first to attach the failure classification.`,
+      );
+    }
+    const diff = diffScenarios(before, after);
+    const verdict = evaluateHealingChanges(diff.changes).verdict;
+    const proposal = createHealingProposal({
+      runId,
+      classification,
+      before,
+      after,
+      requireApproval: verdict !== 'auto-apply',
+    });
+    output.result({ runId, verdict: proposal.decision.verdict, status: proposal.status, proposal });
+    return;
+  }
+  if (runId) {
+    const result = await store.readRunResult(runId);
+    const classifications = classifyRunFailures(result.scenarios);
+    output.result({ runId, classifications });
+    return;
+  }
+  throw new Error(
+    'usage: aitest healing --run <id> | aitest healing --run <id> --before <file> --after <file>',
+  );
+}
+
+async function commandTrends(
+  args: ReturnType<typeof parseCliArgs>,
+  output: CliOutput,
+): Promise<void> {
+  const config = await readConfig(args);
+  const store = new ArtifactStore(config.artifacts.directory);
+  const flakyWindow = toOptionalNumber(getStringOption(args, 'flaky-window'));
+  const trendOptions: { flakyWindow?: number } = {};
+  if (flakyWindow !== undefined) trendOptions.flakyWindow = flakyWindow;
+  const report = await loadTrendReport(store, trendOptions);
+  output.result({ points: report.points, delta: report.delta, flakyScenarioIds: report.flakyScenarioIds });
+}
+
+async function commandRetention(
+  args: ReturnType<typeof parseCliArgs>,
+  output: CliOutput,
+): Promise<void> {
+  const config = await readConfig(args);
+  const store = new ArtifactStore(config.artifacts.directory);
+  const policy: RetentionPolicy = {
+    maxRuns: toOptionalNumber(getStringOption(args, 'max-runs')),
+    maxAgeDays: toOptionalNumber(getStringOption(args, 'max-age-days')),
+    pinnedRunIds: getListOption(args, 'pinned'),
+  };
+  const dryRun = getBooleanOption(args, 'dry-run');
+  const report = await applyRetentionPolicy(store, policy, { dryRun });
+  output.result({ dryRun: report.dryRun, removed: report.removed, kept: report.kept });
+}
+
 function helpText(): string {
   return `AI Web Test — discover first, approve second, execute last
 
@@ -756,6 +849,10 @@ Commands:
   status                              Show inventory and coverage summary
   auth [--role <id>]                  Authenticate a configured role and save storage state
   mcp                                 Start the MCP server (stdio) for AI clients
+  healing --run <id>                  Triage failures of a run (deterministic classification)
+  healing --run <id> --before <f> --after <f>   Review a proposed fix -> auditable proposal
+  trends [--flaky-window <ms>]        Historical trend report (pass rate / coverage / flaky)
+  retention [--max-runs N] [--max-age-days N] [--pinned <ids>] [--dry-run]   Prune old artifacts
 
 Common options:
   --config <path>                     Config path (default: ai-web-test.config.json)
