@@ -205,7 +205,12 @@ export class McpService {
   }
 
   private async readInventory(store: ArtifactStore): Promise<Inventory> {
-    const inventory = await store.readInventory();
+    let inventory: Inventory | null = null;
+    try {
+      inventory = await store.readInventory();
+    } catch {
+      inventory = null;
+    }
     if (!inventory) {
       throw new Error(
         'No inventory found. Run discovery (awt_discover / `aitest discover`) before this operation.',
@@ -239,7 +244,12 @@ export class McpService {
     const config = await this.loadConfig();
     const store = new ArtifactStore(config.artifacts.directory);
     await store.initialize();
-    const inventory = await store.readInventory();
+    let inventory: Inventory | null = null;
+    try {
+      inventory = await store.readInventory();
+    } catch {
+      inventory = null;
+    }
     const scenarios = inventory
       ? await this.readScenarioCatalog(store, inventory, config.policy.allowSecretPersistence)
       : [];

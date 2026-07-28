@@ -3,17 +3,41 @@
   "version": "0.1.0",
   "description": "Agent-friendly source, browser, and AI-assisted testing toolkit for existing web applications",
   "license": "MIT",
-  "keywords": ["playwright", "testing", "ai", "e2e", "visual-regression"],
+  "keywords": [
+    "playwright",
+    "testing",
+    "ai",
+    "e2e",
+    "visual-regression"
+  ],
   "type": "module",
   "private": true,
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
-    "./core": { "types": "./dist/core/index.d.ts", "import": "./dist/core/index.js" },
-    "./discovery": { "types": "./dist/discovery/index.d.ts", "import": "./dist/discovery/index.js" },
-    "./browser": { "types": "./dist/browser/index.d.ts", "import": "./dist/browser/index.js" },
-    "./planning": { "types": "./dist/planning/index.d.ts", "import": "./dist/planning/index.js" },
-    "./ai": { "types": "./dist/ai/index.d.ts", "import": "./dist/ai/index.js" }
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js"
+    },
+    "./discovery": {
+      "types": "./dist/discovery/index.d.ts",
+      "import": "./dist/discovery/index.js"
+    },
+    "./browser": {
+      "types": "./dist/browser/index.d.ts",
+      "import": "./dist/browser/index.js"
+    },
+    "./planning": {
+      "types": "./dist/planning/index.d.ts",
+      "import": "./dist/planning/index.js"
+    },
+    "./ai": {
+      "types": "./dist/ai/index.d.ts",
+      "import": "./dist/ai/index.js"
+    }
   },
   "bin": {
     "aitest": "./dist/cli.js"
@@ -32,8 +56,10 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "playwright": "^1.54.1",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^22.15.3",
