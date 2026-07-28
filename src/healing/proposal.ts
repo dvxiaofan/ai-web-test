@@ -5,7 +5,7 @@ import { diffScenarios } from './semantic-diff.js';
 import { evaluateHealingChanges } from './policy.js';
 import type { FailureClassification, HealingProposal, HealingProposalStatus } from './types.js';
 
-export interface CreateProposalInput {
+export interface CreateHealingProposalInput {
   runId: string;
   classification: FailureClassification;
   before: TestScenario;
@@ -23,7 +23,7 @@ export interface CreateProposalInput {
  * attempt itself is visible in the audit trail — automation must never
  * silently retry with a weaker test.
  */
-export function createHealingProposal(input: CreateProposalInput): HealingProposal {
+export function createHealingProposal(input: CreateHealingProposalInput): HealingProposal {
   if (input.before.id !== input.after.id) {
     throw new Error(`Healing proposal must target one scenario; got ${input.before.id} and ${input.after.id}.`);
   }
