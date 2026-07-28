@@ -4,8 +4,8 @@ import { CONTROLLED_SPEC_SOURCE, type ControlledSpec, type ControlledSpecStep } 
 
 /** Thrown when a Controlled Spec carries a (reasoned) skip and therefore must not be executed. */
 export class SpecSkippedError extends Error {
-  readonly reason?: string;
-  constructor(message: string, reason?: string) {
+  readonly reason?: string | undefined;
+  constructor(message: string, reason?: string | undefined) {
     super(message);
     this.name = 'SpecSkippedError';
     this.reason = reason;
@@ -102,7 +102,7 @@ export function adaptControlledSpecToScenario(spec: ControlledSpec): TestScenari
     evidence: [] as TestScenario['evidence'],
     createdAt: spec.createdAt,
     ...(spec.description !== undefined ? { description: spec.description } : {}),
-    metadata: { controlled: true, specId: spec.id, collectEvidence: true },
+    metadata: { controlled: true, specId: spec.id },
     steps: mapped,
   };
 

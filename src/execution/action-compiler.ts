@@ -23,9 +23,11 @@ export class SpecCompilationError extends Error {
 const URL_PATTERN = /https?:\/\/[^\s'"]+/i;
 
 function extractStepUrl(step: TestScenario['steps'][number]): string | undefined {
-  if (typeof step.url === 'string' && step.url.length > 0) return step.url;
-  if (typeof step.expression === 'string') {
-    const match = step.expression.match(URL_PATTERN);
+  const url = (step as { url?: string }).url;
+  if (typeof url === 'string' && url.length > 0) return url;
+  const expression = (step as { expression?: string }).expression;
+  if (typeof expression === 'string') {
+    const match = expression.match(URL_PATTERN);
     if (match) return match[0];
   }
   return undefined;

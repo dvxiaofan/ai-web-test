@@ -19,6 +19,7 @@ export interface ControlledSpecStep {
   id: string;
   action: ScenarioStep['action'];
   description: string;
+  name?: string;
   locator?: LocatorTarget;
   value?: string;
   url?: string;
@@ -33,6 +34,7 @@ export interface ControlledSpecStep {
   comparator?: 'equals' | 'contains' | 'matches' | 'greater-than' | 'less-than';
   attribute?: string;
   timeoutMs?: number;
+  metadata?: Record<string, unknown>;
   /** Marks this step as a teardown/cleanup step (required for mutating specs). */
   cleanup?: boolean;
 }

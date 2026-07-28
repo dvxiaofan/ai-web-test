@@ -28,7 +28,6 @@ import {
   type RequestAccessDecision,
 } from '../browser/host-policy.js';
 import { compareValues } from './assertion-runner.js';
-import { toEvidenceRefs } from './evidence-collector.js';
 import { computePlanDigest, computeScenarioDigest } from '../planning/approval.js';
 import { compareOrCreateVisualSnapshot } from './visual.js';
 
@@ -321,9 +320,6 @@ async function executeScenario(
       failedRequests: runtimeEvidence.failedRequests,
       visitedUrls: runtimeEvidence.visitedUrls,
       ...(cleanupFailed ? { cleanupFailed: true } : {}),
-      ...(scenario.metadata && (scenario.metadata as Record<string, unknown>).collectEvidence === true
-        ? { evidence: toEvidenceRefs(runtimeEvidence) }
-        : {}),
     },
   };
 }
