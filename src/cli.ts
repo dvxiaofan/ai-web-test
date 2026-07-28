@@ -32,6 +32,7 @@ import { reportModelFromRun, writeHtmlReport, writeMarkdownReport } from './repo
 import { getBooleanOption, getListOption, getStringOption, parseCliArgs, CliOutput, withPrompt } from './cli/index.js';
 import { collectSourceExcerpts, createAiProvider, proposeScenariosWithAi, triageFailureWithAi } from './ai/index.js';
 import { withTargetProcess } from './runtime/index.js';
+import { startMcpServer } from './mcp/index.js';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_CONFIG_NAME = 'ai-web-test.config.json';
@@ -80,6 +81,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         break;
       case 'auth':
         await commandAuth(args, output);
+        break;
+      case 'mcp':
+        await commandMcp(args, output);
         break;
       case 'help':
       case '--help':
@@ -727,6 +731,16 @@ function metadataFailedRequests(value: unknown): Array<{ method: string; url: st
   });
 }
 
+async function commandMcp(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
+  const configPath = path.resolve(process.cwd(), getStringOption(args, 'config') ?? DEFAULT_CONFIG_NAME);
+  if (!(await pathExists(configPath))) {
+    throw new Error(`Config not found at ${configPath}. Use --config to specify its path.`);
+  }
+  // The MCP server exchanges JSON-RPC over stdio; never write human output to
+  // stdout here or the protocol stream would be corrupted.
+  await startMcpServer({ configPath });
+}
+
 function helpText(): string {
   return `AI Web Test — discover first, approve second, execute last
 
@@ -741,6 +755,7 @@ Commands:
   report --run <id>                   Regenerate an HTML report
   status                              Show inventory and coverage summary
   auth [--role <id>]                  Authenticate a configured role and save storage state
+  mcp                                 Start the MCP server (stdio) for AI clients
 
 Common options:
   --config <path>                     Config path (default: ai-web-test.config.json)
