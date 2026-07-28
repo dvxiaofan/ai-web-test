@@ -15,7 +15,6 @@ import {
   type BrowserProfile,
   type Inventory,
   type ProjectConfig,
-  type RunPlan,
   type RunResult,
   type RunScope,
   type TestScenario,
@@ -29,7 +28,7 @@ import { mergeBrowserExploration, summarizeInventory } from './inventory/index.j
 import { approvePlan, proposePlan, validateApprovedPlan } from './planning/index.js';
 import { generateRouteSmokeScenarios, loadScenarios, writeScenarios } from './scenarios/index.js';
 import { executePlan } from './execution/index.js';
-import { writeHtmlReport, writeMarkdownReport, type HtmlReportModel } from './reporting/index.js';
+import { reportModelFromRun, writeHtmlReport, writeMarkdownReport } from './reporting/index.js';
 import { getBooleanOption, getListOption, getStringOption, parseCliArgs, CliOutput, withPrompt } from './cli/index.js';
 import { collectSourceExcerpts, createAiProvider, proposeScenariosWithAi, triageFailureWithAi } from './ai/index.js';
 import { withTargetProcess } from './runtime/index.js';
@@ -658,54 +657,6 @@ function addScenarioCoverage(inventory: Inventory, scenarios: TestScenario[]): I
         withScenario: new Set(scenarios.flatMap((scenario) => scenario.routeIds)).size,
       },
     },
-  };
-}
-
-function reportModelFromRun(result: import('./core/index.js').RunResult, plan: RunPlan, scenarios: TestScenario[] = []): HtmlReportModel {
-  const scenarioNames = new Map(scenarios.map((scenario) => [scenario.id, scenario.name]));
-  const statuses = result.scenarios.map((scenario) => scenario.status);
-  const results = result.scenarios.map((scenario) => {
-    const screenshot = scenario.artifacts.find((artifact) => artifact.kind === 'screenshot')?.path;
-    const trace = scenario.artifacts.find((artifact) => artifact.kind === 'trace')?.path;
-    const error = scenario.error?.message;
-    const resultItem = {
-      id: scenario.scenarioId,
-      name: scenarioNames.get(scenario.scenarioId) ?? scenario.scenarioId,
-      status: scenario.status === 'error' ? 'failed' as const : scenario.status === 'queued' || scenario.status === 'running' ? 'blocked' as const : scenario.status,
-      role: scenario.role,
-      observations: scenario.steps.flatMap((step) => step.assertions.filter((assertion) => assertion.status === 'failed').map((assertion) => assertion.message)),
-      ...(scenario.durationMs === undefined ? {} : { durationMs: scenario.durationMs }),
-      ...(error === undefined ? {} : { error }),
-      ...(screenshot === undefined ? {} : { screenshot }),
-      ...(trace === undefined ? {} : { trace }),
-    };
-    return resultItem;
-  });
-  return {
-    projectName: plan.name,
-    runId: result.id,
-    startedAt: result.startedAt,
-    finishedAt: result.endedAt ?? result.startedAt,
-    planId: plan.id,
-    planDigest: plan.digest,
-    ...(plan.target.environment ? { environment: plan.target.environment } : {}),
-    summary: {
-      passed: statuses.filter((status) => status === 'passed').length,
-      failed: statuses.filter((status) => status === 'failed' || status === 'error').length,
-      skipped: statuses.filter((status) => status === 'skipped').length,
-      blocked: statuses.filter((status) => status === 'blocked').length,
-    },
-    coverage: [
-      { name: 'Routes', discovered: result.coverage.routes.selected, covered: result.coverage.routes.visited, blocked: result.coverage.routes.selected - result.coverage.routes.visited },
-      { name: 'Pages', discovered: result.coverage.pages.selected, covered: result.coverage.pages.rendered, blocked: result.coverage.pages.failed },
-      { name: 'APIs', discovered: result.coverage.apis.selected, covered: result.coverage.apis.observed },
-      { name: 'Scenarios', discovered: result.coverage.scenarios.selected, covered: result.coverage.scenarios.passed, blocked: result.coverage.scenarios.blocked },
-      { name: 'Roles', discovered: result.coverage.roles.selected, covered: result.coverage.roles.exercised },
-      { name: 'Browsers', discovered: result.coverage.browsers.selected, covered: result.coverage.browsers.exercised },
-    ],
-    results,
-    warnings: result.findings.filter((finding) => finding.status === 'open').map((finding) => `${finding.severity}: ${finding.title} — ${finding.summary}`),
-    uncovered: result.coverage.unresolvedIds,
   };
 }
 

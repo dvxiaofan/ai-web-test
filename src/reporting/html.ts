@@ -2,6 +2,60 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { zhCN } from './zh-CN.js';
 import type { HtmlReportModel, ReportTestResult } from './types.js';
+import type { RunResult, RunPlan, TestScenario } from '../core/index.js';
+
+/**
+ * Build the HTML/Markdown report model from a completed run. Shared by the CLI
+ * `report` command and the MCP `awt_report` tool so both produce identical
+ * reports (Phase 5C acceptance: CLI and MCP generate consistent artifacts).
+ */
+export function reportModelFromRun(result: RunResult, plan: RunPlan, scenarios: TestScenario[] = []): HtmlReportModel {
+  const scenarioNames = new Map(scenarios.map((scenario) => [scenario.id, scenario.name]));
+  const statuses = result.scenarios.map((scenario) => scenario.status);
+  const results = result.scenarios.map((scenario) => {
+    const screenshot = scenario.artifacts.find((artifact) => artifact.kind === 'screenshot')?.path;
+    const trace = scenario.artifacts.find((artifact) => artifact.kind === 'trace')?.path;
+    const error = scenario.error?.message;
+    const resultItem = {
+      id: scenario.scenarioId,
+      name: scenarioNames.get(scenario.scenarioId) ?? scenario.scenarioId,
+      status: scenario.status === 'error' ? ('failed' as const) : scenario.status === 'queued' || scenario.status === 'running' ? ('blocked' as const) : scenario.status,
+      role: scenario.role,
+      observations: scenario.steps.flatMap((step) => step.assertions.filter((assertion) => assertion.status === 'failed').map((assertion) => assertion.message)),
+      ...(scenario.durationMs === undefined ? {} : { durationMs: scenario.durationMs }),
+      ...(error === undefined ? {} : { error }),
+      ...(screenshot === undefined ? {} : { screenshot }),
+      ...(trace === undefined ? {} : { trace }),
+    };
+    return resultItem;
+  });
+  return {
+    projectName: plan.name,
+    runId: result.id,
+    startedAt: result.startedAt,
+    finishedAt: result.endedAt ?? result.startedAt,
+    planId: plan.id,
+    planDigest: plan.digest,
+    ...(plan.target.environment ? { environment: plan.target.environment } : {}),
+    summary: {
+      passed: statuses.filter((status) => status === 'passed').length,
+      failed: statuses.filter((status) => status === 'failed' || status === 'error').length,
+      skipped: statuses.filter((status) => status === 'skipped').length,
+      blocked: statuses.filter((status) => status === 'blocked').length,
+    },
+    coverage: [
+      { name: 'Routes', discovered: result.coverage.routes.selected, covered: result.coverage.routes.visited, blocked: result.coverage.routes.selected - result.coverage.routes.visited },
+      { name: 'Pages', discovered: result.coverage.pages.selected, covered: result.coverage.pages.rendered, blocked: result.coverage.pages.failed },
+      { name: 'APIs', discovered: result.coverage.apis.selected, covered: result.coverage.apis.observed },
+      { name: 'Scenarios', discovered: result.coverage.scenarios.selected, covered: result.coverage.scenarios.passed, blocked: result.coverage.scenarios.blocked },
+      { name: 'Roles', discovered: result.coverage.roles.selected, covered: result.coverage.roles.exercised },
+      { name: 'Browsers', discovered: result.coverage.browsers.selected, covered: result.coverage.browsers.exercised },
+    ],
+    results,
+    warnings: result.findings.filter((finding) => finding.status === 'open').map((finding) => `${finding.severity}: ${finding.title} — ${finding.summary}`),
+    uncovered: result.coverage.unresolvedIds,
+  };
+}
 
 function zhStatus(status: string): string {
   switch (status) {
