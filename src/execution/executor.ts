@@ -27,6 +27,7 @@ import {
   evaluateRequestAccess,
   type RequestAccessDecision,
 } from '../browser/host-policy.js';
+import { compareValues } from './assertion-runner.js';
 import { computePlanDigest, computeScenarioDigest } from '../planning/approval.js';
 import { compareOrCreateVisualSnapshot } from './visual.js';
 
@@ -665,25 +666,6 @@ function riskRank(risk: ActionRisk): number {
       return 1;
     case 'destructive':
       return 2;
-  }
-}
-
-function compareValues(
-  actual: JsonValue,
-  expected: JsonValue | undefined,
-  comparator: NonNullable<Extract<ScenarioStep, { action: 'assert' }>['comparator']>,
-): boolean {
-  switch (comparator) {
-    case 'equals':
-      return JSON.stringify(actual) === JSON.stringify(expected);
-    case 'contains':
-      return String(actual).includes(String(expected ?? ''));
-    case 'matches':
-      return new RegExp(String(expected ?? '')).test(String(actual));
-    case 'greater-than':
-      return Number(actual) > Number(expected);
-    case 'less-than':
-      return Number(actual) < Number(expected);
   }
 }
 
