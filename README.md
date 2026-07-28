@@ -147,6 +147,32 @@ See [release readiness](docs/READINESS.md), [Product requirements](docs/PRODUCT.
 [security](docs/SECURITY.md), [AI assistants](docs/AGENT_GUIDE.md), and
 [CI](docs/CI.md).
 
+## Project report tree (human-facing)
+
+When a human-readable deliverable is needed, `aitest report --by-module` (or the
+MCP tool `awt_project_report`) builds a self-contained `test-<project>` directory
+next to the artifact workspace:
+
+```text
+test-<project>/
+  index.html              # first document: global business-module analysis
+  <module>/               # one subdirectory per tested module
+    module.html           # business, steps (each with screenshot), result, problems
+    screenshot-001.png …  # step screenshots copied next to the report
+```
+
+- `index.html` is the required first document: it lists every discovered
+  business module with its routes/pages/APIs/scenarios and links to each module
+  report. Generated from `inventory.json` (no run required).
+- Each tested module gets its own subdirectory containing `module.html`. The
+  report describes the test business, every step (with an inline screenshot when
+  `--step-screenshots` was used during `run`), the final result, and any problems
+  found. Modules with no executed scenarios are omitted.
+- Override the directory with `report.projectDirectory` in the config.
+
+Per-step screenshots require `run --step-screenshots`, which is gated by
+`policy.allowSecretPersistence`.
+
 ## Repository layout
 
 ```text

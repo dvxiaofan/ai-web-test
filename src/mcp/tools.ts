@@ -290,4 +290,24 @@ export function registerMcpTools(server: McpServer, service: McpService): void {
       }
     },
   );
+
+  server.registerTool(
+    MCP_TOOLS.projectReport,
+    {
+      description:
+        'Build the test-<project> report tree: a global business-module analysis (index.html) plus one subdirectory per tested module with an inline-screenshot HTML report. Use --run to bind a specific run, or omit it to use the latest run.',
+      inputSchema: {
+        run: z.string().optional().describe('Run id to report (e.g. run_xxx). Omit to use the latest run.'),
+      },
+    },
+    async (args) => {
+      try {
+        const params: { runId?: string } = {};
+        if (typeof args.run === 'string' && args.run.length > 0) params.runId = args.run;
+        return jsonResult(await service.projectReport(params));
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
 }

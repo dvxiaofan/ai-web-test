@@ -32,6 +32,7 @@ export const MCP_TOOLS = {
   healingReview: 'awt_healing_review',
   healingTrends: 'awt_healing_trends',
   healingRetention: 'awt_healing_retention',
+  projectReport: 'awt_project_report',
 } as const;
 
 export type McpToolName = (typeof MCP_TOOLS)[keyof typeof MCP_TOOLS];

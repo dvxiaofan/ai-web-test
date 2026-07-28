@@ -15,6 +15,7 @@ import {
   type BrowserProfile,
   type Inventory,
   type ProjectConfig,
+  type RunPlan,
   type RunResult,
   type RunScope,
   type TestScenario,
@@ -35,6 +36,7 @@ import { approvePlan, proposePlan, validateApprovedPlan } from './planning/index
 import { generateRouteSmokeScenarios, loadScenarios, writeScenarios } from './scenarios/index.js';
 import { executePlan } from './execution/index.js';
 import { reportModelFromRun, writeHtmlReport, writeMarkdownReport } from './reporting/index.js';
+import { writeProjectReport } from './reporting/project-report.js';
 import { getBooleanOption, getListOption, getStringOption, parseCliArgs, CliOutput, withPrompt } from './cli/index.js';
 import { collectSourceExcerpts, createAiProvider, proposeScenariosWithAi, triageFailureWithAi } from './ai/index.js';
 import { withTargetProcess } from './runtime/index.js';
@@ -77,7 +79,11 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         await commandRun(args, output);
         break;
       case 'report':
-        await commandReport(args, output);
+        if (getBooleanOption(args, 'by-module')) {
+          await commandProjectReport(args, output);
+        } else {
+          await commandReport(args, output);
+        }
         break;
       case 'analyze':
         await commandAnalyze(args, output);
@@ -375,6 +381,7 @@ async function commandRun(args: ReturnType<typeof parseCliArgs>, output: CliOutp
   const storageStateByRole = buildStorageStateMap(config, inventory);
   const captureTrace = config.policy.allowSecretPersistence && getBooleanOption(args, 'trace', false);
   const captureScreenshots = config.policy.allowSecretPersistence && getBooleanOption(args, 'screenshots', false);
+  const captureScreenshotPerStep = config.policy.allowSecretPersistence && getBooleanOption(args, 'step-screenshots', false);
   if (!config.policy.allowSecretPersistence && (getBooleanOption(args, 'trace') || getBooleanOption(args, 'screenshots'))) {
     output.warn('Trace/screenshot persistence was requested but policy.allowSecretPersistence is false; sensitive artifacts will not be written.');
   }
@@ -394,6 +401,7 @@ async function commandRun(args: ReturnType<typeof parseCliArgs>, output: CliOutp
       storageStateByRole,
       captureTrace,
       captureScreenshotsOnFailure: captureScreenshots,
+      captureScreenshotPerStep,
       visualBaselineDir: store.resolve('visual-baselines'),
       updateVisualBaselines: getBooleanOption(args, 'update-baselines'),
       failOnVisualDiff: !getBooleanOption(args, 'allow-visual-diff'),
@@ -430,6 +438,51 @@ async function commandReport(args: ReturnType<typeof parseCliArgs>, output: CliO
   const markdownTarget = target.replace(/\.html$/i, '.md');
   await writeMarkdownReport(model, markdownTarget);
   output.result({ reportPath: target, markdownPath: markdownTarget, runId }, 'completed');
+}
+
+async function latestRunId(store: ArtifactStore): Promise<string | undefined> {
+  try {
+    const entries = await readdir(store.layout.runs);
+    const dirs = entries.filter((d) => d.startsWith('run_'));
+    if (dirs.length === 0) return undefined;
+    const withMtime = await Promise.all(
+      dirs.map(async (d) => ({ d, mtime: (await stat(path.join(store.layout.runs, d))).mtimeMs })),
+    );
+    withMtime.sort((a, b) => a.mtime - b.mtime);
+    return withMtime.at(-1)?.d;
+  } catch {
+    return undefined;
+  }
+}
+
+async function commandProjectReport(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
+  const config = await readConfig(args);
+  output.setContext({ projectId: deriveProjectId(config.target) });
+  const store = new ArtifactStore(config.artifacts.directory);
+  await store.initialize();
+  const inventory = await store.readInventory();
+  const scenarios = await readScenarioCatalog(store, inventory, config.policy.allowSecretPersistence);
+
+  let runResult: RunResult | undefined;
+  let plan: RunPlan | undefined;
+  const runId = getStringOption(args, 'run');
+  const resolvedRunId = runId ?? (await latestRunId(store));
+  if (resolvedRunId) {
+    runResult = await store.readRunResult(resolvedRunId);
+    plan = await store.readPlan(runResult.planId, 'approved');
+  }
+
+  const result = await writeProjectReport({ config, inventory, scenarios, runResult, plan });
+  output.result(
+    {
+      rootDir: result.rootDir,
+      indexHtmlPath: result.indexHtmlPath,
+      moduleReports: result.modules.length,
+      modules: result.modules.map((m) => ({ module: m.moduleName, dir: m.dir, htmlPath: m.htmlPath, scenarios: m.scenarioCount })),
+      runId: resolvedRunId,
+    },
+    'completed',
+  );
 }
 
 async function commandAnalyze(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
@@ -845,7 +898,9 @@ Commands:
   analyze --run <id>                 Ask the configured AI provider to triage failed scenarios
   approve --plan <id>                 Confirm a proposed plan (interactive by default)
   run --plan <id>                     Execute an approved plan in Playwright
+  run --step-screenshots              Capture a screenshot after every step (needs allowSecretPersistence)
   report --run <id>                   Regenerate an HTML report
+  report --by-module [--run <id>]     Build the test-<project> tree: global module analysis + per-module HTML reports
   status                              Show inventory and coverage summary
   auth [--role <id>]                  Authenticate a configured role and save storage state
   mcp                                 Start the MCP server (stdio) for AI clients

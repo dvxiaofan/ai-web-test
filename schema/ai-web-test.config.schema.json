@@ -126,7 +126,14 @@
       },
       "additionalProperties": false
     },
-    "presets": { "type": "object", "additionalProperties": { "type": "object" } }
+    "presets": { "type": "object", "additionalProperties": { "type": "object" } },
+    "report": {
+      "type": "object",
+      "properties": {
+        "projectDirectory": { "type": "string", "description": "Override the top-level 'test-<project>' report directory. Relative paths resolve against the config directory." }
+      },
+      "additionalProperties": false
+    }
   },
   "$defs": {
     "stringArray": { "type": "array", "items": { "type": "string" } },

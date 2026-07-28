@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { readdir } from 'node:fs/promises';
+import { readdir, stat } from 'node:fs/promises';
 import {
   ArtifactStore,
   loadConfig,
@@ -37,6 +37,7 @@ import {
   writeMarkdownReport,
   type HtmlReportModel,
 } from '../reporting/index.js';
+import { writeProjectReport } from '../reporting/project-report.js';
 import { withTargetProcess, type TargetProcessOptions } from '../runtime/index.js';
 import { classifyRunFailures } from '../healing/classifier.js';
 import { diffScenarios } from '../healing/semantic-diff.js';
@@ -674,7 +675,55 @@ export class McpService {
     return applyRetentionPolicy(store, policy, retentionOptions);
   }
 
+  /**
+   * Build the `test-<project>` report tree: a global business-module analysis
+   * (index.html) plus one subdirectory per tested module with an inline-screenshot
+   * HTML report. Mirrors `aitest report --by-module`.
+   */
+  async projectReport(args: { runId?: string } = {}): Promise<{
+    rootDir: string;
+    indexHtmlPath: string;
+    moduleReports: number;
+    modules: { module: string; dir: string; htmlPath: string; scenarios: number }[];
+    runId?: string | undefined;
+  }> {
+    const config = await this.loadConfig();
+    const store = await this.store();
+    const inventory = await store.readInventory();
+    const scenarios = await this.readScenarioCatalog(store, inventory, config.policy.allowSecretPersistence);
+    const resolvedRunId = args.runId ?? (await this.latestRunId(store));
+    let runResult: RunResult | undefined;
+    let plan: RunPlan | undefined;
+    if (resolvedRunId) {
+      runResult = await store.readRunResult(resolvedRunId);
+      plan = await store.readPlan(runResult.planId, 'approved');
+    }
+    const result = await writeProjectReport({ config, inventory, scenarios, runResult, plan });
+    return {
+      rootDir: result.rootDir,
+      indexHtmlPath: result.indexHtmlPath,
+      moduleReports: result.modules.length,
+      modules: result.modules.map((m) => ({ module: m.moduleName, dir: m.dir, htmlPath: m.htmlPath, scenarios: m.scenarioCount })),
+      runId: resolvedRunId,
+    };
+  }
+
   // --- internal helpers ---------------------------------------------------
+
+  private async latestRunId(store: ArtifactStore): Promise<string | undefined> {
+    try {
+      const entries = await readdir(store.layout.runs);
+      const dirs = entries.filter((d) => d.startsWith('run_'));
+      if (dirs.length === 0) return undefined;
+      const withMtime = await Promise.all(
+        dirs.map(async (d) => ({ d, mtime: (await stat(path.join(store.layout.runs, d))).mtimeMs })),
+      );
+      withMtime.sort((a, b) => a.mtime - b.mtime);
+      return withMtime.at(-1)?.d;
+    } catch {
+      return undefined;
+    }
+  }
 
   private async latestPlanByPrefix(store: ArtifactStore, prefix: string): Promise<string | undefined> {
     const planDir = path.join(store.layout.plans, prefix.replace(/-$/, ''));

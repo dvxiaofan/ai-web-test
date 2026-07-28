@@ -39,6 +39,7 @@ export interface ExecutePlanOptions {
   environmentVariables?: Record<string, string | undefined>;
   captureTrace?: boolean;
   captureScreenshotsOnFailure?: boolean;
+  captureScreenshotPerStep?: boolean;
   visualBaselineDir?: string;
   updateVisualBaselines?: boolean;
   failOnVisualDiff?: boolean;
@@ -260,6 +261,19 @@ async function executeScenario(
         stepResult.error = serializeError(error);
       }
       stepResults.push(stepResult);
+      // Capture a screenshot after each step when explicitly requested and the
+      // policy permits sensitive artifacts. This powers per-step evidence in
+      // the module-level HTML reports.
+      if (options.captureScreenshotPerStep && shouldPersistSensitiveArtifact(plan, options.captureScreenshotPerStep)) {
+        try {
+          const shotName = `step-${String(stepResults.length).padStart(2, '0')}-${sanitizeFilename(step.id)}.png`;
+          const shotPath = path.join(scenarioDir, shotName);
+          await page.screenshot({ path: shotPath, fullPage: false });
+          stepResult.artifacts.push({ kind: 'screenshot', path: shotPath, mimeType: 'image/png' });
+        } catch {
+          // best-effort capture; ignore screenshot failures
+        }
+      }
       // A failed teardown/cleanup step is reported separately so data-isolation
       // regressions are visible even when the scenario body passed.
       if (step.metadata && (step.metadata as Record<string, unknown>).cleanup === true && stepResult.status !== 'passed') {

@@ -195,6 +195,7 @@ export interface ProjectConfigInput {
   policy?: Partial<TestPolicy>;
   ai?: AiConfigInput;
   presets?: Record<string, PresetConfigInput>;
+  report?: { projectDirectory?: string };
   metadata?: JsonObject;
 }
 
@@ -212,6 +213,7 @@ export interface ProjectConfig {
   policy: TestPolicy;
   ai: AiConfig;
   presets: Record<string, PresetConfig>;
+  report: { projectDirectory?: string };
   metadata?: JsonObject;
   digest: string;
 }
@@ -411,6 +413,10 @@ function buildConfig(input: ProjectConfigInput, options: ConfigValidationOptions
 
   const presets = buildPresets(input.presets, roles, runtime.profiles, policy);
   const metadata = input.metadata;
+  const report: { projectDirectory?: string } = {};
+  if (isRecord(input.report) && typeof input.report.projectDirectory === 'string') {
+    report.projectDirectory = input.report.projectDirectory;
+  }
   const withoutDigest = {
     schemaVersion: CONFIG_SCHEMA_VERSION,
     configDir,
@@ -424,6 +430,7 @@ function buildConfig(input: ProjectConfigInput, options: ConfigValidationOptions
     policy,
     ai,
     presets,
+    report,
     ...(metadata !== undefined ? { metadata } : {}),
   };
 

@@ -22,6 +22,18 @@ assistant that operates AI Web Test.
 10. If an AI provider is configured, optionally run `aitest analyze --run ...`.
 11. Classify failures as confirmed, probable, environment, data, flaky, or
     unresolved. Do not edit the target project automatically.
+12. Produce the human-facing deliverable with `aitest report --by-module`
+    (or MCP `awt_project_report`). Its output structure is a hard contract:
+    - The top-level `test-<project>` directory's first document MUST be
+      `index.html` — the global analysis of every discovered business module.
+    - Each tested module MUST get its own subdirectory named after the module,
+      containing `module.html` (business, steps with inline screenshots, final
+      result, and problems found).
+    - Screenshots MUST live inside the module subdirectory so the HTML displays
+      them when opened directly.
+    - For step screenshots, the operator must run `aitest run --step-screenshots`
+      (gated by `policy.allowSecretPersistence`); modules with no executed
+      scenarios are omitted from the tree.
 
 ## Required assistant behavior
 
