@@ -11,6 +11,7 @@ import {
   ConfigValidationError,
   loadConfig,
   pathExists,
+  readJsonFile,
   writeJsonFile,
   type BrowserProfile,
   type Inventory,
@@ -23,7 +24,7 @@ import {
 import { deriveProjectId, generateOperationId, AgentError, type AgentState } from './agent/index.js';
 import { authenticate, saveStorageState } from './auth/index.js';
 import { createBrowserAuthSession } from './browser/auth-surface.js';
-import { discoverSource } from './discovery/index.js';
+import { createRuntimeFirstInventory, discoverSource } from './discovery/index.js';
 import { exploreBrowser } from './browser/index.js';
 import { classifyRunFailures } from './healing/classifier.js';
 import { diffScenarios } from './healing/semantic-diff.js';
@@ -31,7 +32,13 @@ import { evaluateHealingChanges } from './healing/policy.js';
 import { createHealingProposal } from './healing/proposal.js';
 import { loadTrendReport } from './history/trends.js';
 import { applyRetentionPolicy, type RetentionPolicy } from './history/retention.js';
-import { mergeBrowserExploration, summarizeInventory } from './inventory/index.js';
+import {
+  diffInventories,
+  mergeBrowserExploration,
+  mergeExternalInventory,
+  summarizeInventory,
+  type ExternalInventoryInput,
+} from './inventory/index.js';
 import { approvePlan, proposePlan, validateApprovedPlan } from './planning/index.js';
 import { generateRouteSmokeScenarios, loadScenarios, writeScenarios } from './scenarios/index.js';
 import { executePlan } from './execution/index.js';
@@ -106,6 +113,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       case 'retention':
         await commandRetention(args, output);
         break;
+      case 'inventory':
+        await commandInventory(args, output);
+        break;
       case 'help':
       case '--help':
       case '-h':
@@ -168,23 +178,80 @@ async function commandInit(args: ReturnType<typeof parseCliArgs>, output: CliOut
   }, 'initialized');
 }
 
+async function commandInventory(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
+  const sub = args.positionals[0];
+  if (sub === 'merge') {
+    const file = getStringOption(args, 'file');
+    if (!file) throw new Error('usage: aitest inventory merge --file <supplement.json>');
+    const config = await readConfig(args);
+    output.setContext({ projectId: deriveProjectId(config.target) });
+    const store = new ArtifactStore(config.artifacts.directory);
+    const inventory = await store.readInventory();
+    const supplement = await readJsonFile<ExternalInventoryInput>(path.resolve(process.cwd(), file));
+    const merged = mergeExternalInventory(inventory, supplement);
+    const inventoryPath = await store.writeInventory(merged.inventory);
+    output.result(
+      {
+        inventoryPath,
+        added: merged.added,
+        updated: merged.updated,
+        warnings: merged.warnings,
+        nodes: merged.inventory.nodes.length,
+      },
+      'discovered',
+    );
+    return;
+  }
+  if (sub === 'diff') {
+    const basePath = getStringOption(args, 'base');
+    const comparePath = getStringOption(args, 'compare');
+    if (!basePath || !comparePath) {
+      throw new Error('usage: aitest inventory diff --base <inventory.json> --compare <inventory.json>');
+    }
+    const base = await readJsonFile<Inventory>(path.resolve(process.cwd(), basePath));
+    const compare = await readJsonFile<Inventory>(path.resolve(process.cwd(), comparePath));
+    output.result(diffInventories(base, compare));
+    return;
+  }
+  throw new Error('usage: aitest inventory merge --file <json> | aitest inventory diff --base <json> --compare <json>');
+}
+
 async function commandDiscover(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
   const config = await readConfig(args);
   output.setContext({ projectId: deriveProjectId(config.target) });
   const store = new ArtifactStore(config.artifacts.directory);
   await store.initialize();
-  output.info(`Analyzing source: ${config.target.rootDir}`);
-  const draft = await discoverSource({
-    rootDir: config.target.rootDir,
-    projectName: config.project.name,
-    ...(config.target.baseUrl ? { baseUrl: config.target.baseUrl } : {}),
-    include: config.source.include,
-    ignore: config.source.exclude,
-    maxFiles: config.source.maxFiles,
-    maxFileSizeBytes: config.source.maxFileSizeBytes,
-    followSymlinks: config.source.followSymlinks,
-  });
-  let inventory = draft.inventory;
+  const runtimeFirst = config.target.discovery === 'runtime-first' || getBooleanOption(args, 'runtime-only');
+
+  let inventory: Inventory;
+  let seedRoutes: string[];
+  if (runtimeFirst) {
+    if (!config.target.baseUrl) {
+      throw new Error('runtime-first discovery requires target.baseUrl.');
+    }
+    output.info(`Runtime-first discovery (no source analysis): ${config.target.baseUrl}`);
+    inventory = createRuntimeFirstInventory({
+      projectName: config.project.name,
+      baseUrl: config.target.baseUrl,
+      rootDir: config.target.rootDir,
+    });
+    seedRoutes = config.target.seedPaths.length ? [...config.target.seedPaths] : ['/'];
+  } else {
+    output.info(`Analyzing source: ${config.target.rootDir}`);
+    const draft = await discoverSource({
+      rootDir: config.target.rootDir,
+      projectName: config.project.name,
+      ...(config.target.baseUrl ? { baseUrl: config.target.baseUrl } : {}),
+      include: config.source.include,
+      ignore: config.source.exclude,
+      maxFiles: config.source.maxFiles,
+      maxFileSizeBytes: config.source.maxFileSizeBytes,
+      followSymlinks: config.source.followSymlinks,
+    });
+    inventory = draft.inventory;
+    seedRoutes = [...draft.routes.map((route) => route.path), ...config.target.seedPaths];
+  }
+
   let runtimeStatus: string | undefined;
   if (config.runtime.enabled && config.target.baseUrl && !getBooleanOption(args, 'static-only')) {
     await withTargetProcess({
@@ -202,7 +269,7 @@ async function commandDiscover(args: ReturnType<typeof parseCliArgs>, output: Cl
         baseUrl: config.target.baseUrl as string,
         allowedHosts: config.policy.allowedHosts,
         blockedHosts: config.policy.blockedHosts,
-        routes: draft.routes.map((route) => route.path),
+        routes: [...new Set(seedRoutes)],
         browserName: profile?.browser ?? 'chromium',
         headless: getBooleanOption(args, 'headed') ? false : profile?.headless ?? config.runtime.headless,
         viewport: profile?.viewport ?? { width: 1440, height: 900 },
@@ -472,7 +539,8 @@ async function commandProjectReport(args: ReturnType<typeof parseCliArgs>, outpu
     plan = await store.readPlan(runResult.planId, 'approved');
   }
 
-  const result = await writeProjectReport({ config, inventory, scenarios, runResult, plan });
+  const overview = await store.readOverviewIfExists();
+  const result = await writeProjectReport({ config, inventory, scenarios, runResult, plan, overview });
   output.result(
     {
       rootDir: result.rootDir,
@@ -901,6 +969,8 @@ Commands:
   run --step-screenshots              Capture a screenshot after every step (needs allowSecretPersistence)
   report --run <id>                   Regenerate an HTML report
   report --by-module [--run <id>]     Build the test-<project> tree: global module analysis + per-module HTML reports
+  inventory merge --file <json>       Merge an operator/AI inventory supplement (modules/routes/apis)
+  inventory diff --base <json> --compare <json>   Compare two inventories (recall + blind spots)
   status                              Show inventory and coverage summary
   auth [--role <id>]                  Authenticate a configured role and save storage state
   mcp                                 Start the MCP server (stdio) for AI clients

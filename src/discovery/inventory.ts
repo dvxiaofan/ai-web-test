@@ -411,6 +411,66 @@ export function buildInventory(input: BuildInventoryInput): Inventory {
   return inventory;
 }
 
+/**
+ * Seed inventory for `runtime-first` (black-box) discovery: there is no source
+ * tree to parse, so the inventory starts with only a project node and is later
+ * filled in by browser exploration and/or `aitest inventory merge`.
+ */
+export function createRuntimeFirstInventory(input: {
+  projectName: string;
+  baseUrl: string;
+  rootDir?: string;
+  generatedAt?: string;
+}): Inventory {
+  const generatedAt = input.generatedAt ?? new Date().toISOString();
+  const projectId = stableId("project", input.baseUrl);
+  const projectNode: ProjectInventoryNode = {
+    id: projectId,
+    kind: "project",
+    name: input.projectName,
+    rootDir: input.rootDir ?? "",
+    tags: ["runtime-first"],
+    confidence: 1,
+    evidence: [
+      {
+        id: stableId("evidence", "runtime-first", input.baseUrl),
+        kind: "runtime",
+        summary: `runtime-first discovery seeded from ${input.baseUrl}`,
+        confidence: 1,
+        observedAt: generatedAt,
+        uri: input.baseUrl,
+      },
+    ],
+  };
+
+  const coverage: InventoryCoverage = {
+    routes: { discovered: 0, visited: 0, rendered: 0 },
+    pages: { discovered: 0, rendered: 0, withScenario: 0 },
+    apis: { discovered: 0, observed: 0, asserted: 0 },
+    roles: { configured: 0, exercised: 0 },
+    scenarios: { discovered: 0, proposed: 0, approved: 0 },
+    unresolved: 0,
+  };
+
+  return {
+    schemaVersion: 1,
+    id: stableId("inventory", input.baseUrl, generatedAt),
+    project: {
+      id: projectId,
+      name: input.projectName,
+      rootDir: input.rootDir ?? "",
+      baseUrl: input.baseUrl,
+    },
+    generatedAt,
+    runtimeBaseUrl: input.baseUrl,
+    nodes: [projectNode],
+    edges: [],
+    findings: [],
+    coverage,
+    metadata: { discoveryMode: "runtime-first" },
+  };
+}
+
 export function buildModules(
   files: readonly SourceFileDescriptor[],
   routes: readonly DiscoveredRoute[],

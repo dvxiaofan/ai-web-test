@@ -1,0 +1,48 @@
+{
+  "$schema": "../schema/ai-web-test.config.schema.json",
+  "project": { "name": "sample-shop" },
+  "target": {
+    "rootDir": "../fixtures/sample-app",
+    "baseUrl": "http://127.0.0.1:4178",
+    "startCommand": "npm start"
+  },
+  "artifacts": {
+    "directory": "../.ai-web-test/sample-shop"
+  },
+  "source": {
+    "include": ["src", "server.mjs"],
+    "exclude": ["node_modules", "dist", ".git"],
+    "maxFiles": 5000,
+    "maxFileSizeBytes": 524288
+  },
+  "runtime": {
+    "enabled": true,
+    "headless": true,
+    "profiles": [
+      { "id": "desktop-chromium", "browser": "chromium", "viewport": { "width": 1280, "height": 800 } }
+    ]
+  },
+  "policy": {
+    "maxRisk": "read",
+    "allowedHosts": ["127.0.0.1"],
+    "allowExternalOrigins": false,
+    "confirmationRequired": true,
+    "destructiveActionAllowlist": []
+  },
+  "metadata": {
+    "overview": {
+      "intro": "示例电商站点：包含商品浏览、下单、订单查询与管理后台四类业务能力，用于演示业务全景报告。",
+      "techStack": "原生 ES 模块前端 + Node HTTP 服务（fixtures/sample-app）",
+      "businessSystems": ["前台商城", "管理后台"],
+      "accounts": [
+        { "role": "guest", "note": "免登录可浏览商品" },
+        { "role": "admin", "note": "后台账号由环境变量注入，不落盘" }
+      ],
+      "conventions": [
+        "默认 maxRisk=read，不执行下单等写操作，除非显式审批",
+        "仅允许访问 127.0.0.1，禁止外部域名",
+        "每个缺陷必须附带截图或网络证据"
+      ]
+    }
+  }
+}

@@ -83,6 +83,17 @@ export interface ArtifactConfig {
   retainRuns: number;
 }
 
+/**
+ * How the inventory is discovered.
+ * - `static`: parse the target source tree (default; requires `rootDir`).
+ * - `runtime-first`: black-box mode for targets without source access; the
+ *   inventory is seeded from `baseUrl` (+ optional `seedPaths`) via browser
+ *   exploration and can be topped up with `aitest inventory merge`.
+ */
+export type DiscoveryMode = "static" | "runtime-first";
+
+export const DISCOVERY_MODES: readonly DiscoveryMode[] = ["static", "runtime-first"];
+
 export interface TargetConfigInput {
   rootDir?: string;
   baseUrl?: string;
@@ -91,6 +102,9 @@ export interface TargetConfigInput {
   environment?: string;
   env?: Record<string, string>;
   allowProductionLikeHost?: boolean;
+  discovery?: DiscoveryMode;
+  /** Extra seed paths for runtime-first exploration, e.g. ["/login", "/orders"]. */
+  seedPaths?: string[];
 }
 
 export interface TargetConfig {
@@ -101,6 +115,10 @@ export interface TargetConfig {
   environment: string;
   env: Record<string, string>;
   allowProductionLikeHost: boolean;
+  /** Discovery strategy; defaults to `static` so existing configs behave as before. */
+  discovery: DiscoveryMode;
+  /** Extra seed paths used when exploring a runtime-first target. */
+  seedPaths: string[];
 }
 
 export interface AiConfigInput {
@@ -293,6 +311,23 @@ export function collectConfigIssues(input: unknown, options: ConfigValidationOpt
   if (target.env !== undefined) {
     validateStringMap(target.env, "target.env", issues);
   }
+  if (target.discovery !== undefined && !DISCOVERY_MODES.includes(target.discovery as DiscoveryMode)) {
+    issues.push({
+      path: "target.discovery",
+      code: "value",
+      message: `discovery must be one of: ${DISCOVERY_MODES.join(", ")}.`,
+    });
+  }
+  if (target.seedPaths !== undefined) {
+    validateStringArray(target.seedPaths, "target.seedPaths", issues);
+  }
+  if (target.discovery === "runtime-first" && firstString(target.baseUrl, input.baseUrl) === undefined) {
+    issues.push({
+      path: "target.baseUrl",
+      code: "value",
+      message: "runtime-first discovery requires target.baseUrl (there is no source tree to analyze).",
+    });
+  }
 
   if (input.source !== undefined && !isRecord(input.source)) {
     issues.push({ path: "source", code: "type", message: "source must be an object." });
@@ -347,6 +382,7 @@ function buildConfig(input: ProjectConfigInput, options: ConfigValidationOptions
   const rawStartCommand = firstString(rawTarget.startCommand, input.startCommand);
   const rootDir = path.resolve(configDir, firstString(rawTarget.rootDir, input.rootDir) ?? ".");
   const workingDirectory = path.resolve(configDir, firstString(rawTarget.workingDirectory, rootDir) ?? rootDir);
+  const discovery: DiscoveryMode = rawTarget.discovery === "runtime-first" ? "runtime-first" : "static";
   const target: TargetConfig = {
     rootDir,
     ...(rawBaseUrl !== undefined ? { baseUrl: rawBaseUrl } : {}),
@@ -355,6 +391,10 @@ function buildConfig(input: ProjectConfigInput, options: ConfigValidationOptions
     environment: firstString(rawTarget.environment) ?? "test",
     env: cloneStringMap(rawTarget.env),
     allowProductionLikeHost: rawTarget.allowProductionLikeHost === true,
+    discovery,
+    seedPaths: Array.isArray(rawTarget.seedPaths)
+      ? rawTarget.seedPaths.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      : [],
   };
 
   const projectName = isRecord(input.project) && typeof input.project.name === "string" && input.project.name.trim().length > 0

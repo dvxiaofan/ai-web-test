@@ -80,6 +80,49 @@ export interface Finding {
   metadata?: JsonObject;
 }
 
+/** A cross-module end-to-end flow tracked at project level. */
+export interface ProjectOverviewFlow {
+  name: string;
+  steps: string[];
+  status: "passed" | "failed" | "blocked" | "not-run";
+  scenarioIds: string[];
+  notes?: string;
+}
+
+export interface ProjectOverviewNextStep {
+  priority: "high" | "medium" | "low";
+  text: string;
+}
+
+export interface ProjectOverviewAcceptanceItem {
+  item: string;
+  done: boolean;
+  notes?: string;
+}
+
+export interface ProjectOverviewConclusion {
+  at: IsoDateTime;
+  text: string;
+}
+
+/**
+ * Project-level narrative that survives across runs: end-to-end flow results,
+ * next steps, acceptance checklist and staged conclusions.
+ *
+ * Static project facts (intro, tech stack, conventions, business systems)
+ * belong to `ProjectConfig.metadata.overview` instead — they are inputs, not
+ * test outputs.
+ */
+export interface ProjectOverview {
+  schemaVersion: 1;
+  updatedAt: IsoDateTime;
+  e2eFlows: ProjectOverviewFlow[];
+  nextSteps: ProjectOverviewNextStep[];
+  acceptance: ProjectOverviewAcceptanceItem[];
+  conclusions: ProjectOverviewConclusion[];
+  metadata?: JsonObject;
+}
+
 export type InventoryNodeKind =
   | "project"
   | "module"

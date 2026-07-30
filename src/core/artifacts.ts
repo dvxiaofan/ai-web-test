@@ -2,11 +2,12 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { readJsonFile, pathExists, writeJsonFile, type WriteJsonOptions } from "./json.js";
-import type { Inventory, RunPlan, RunResult } from "./types.js";
+import type { Inventory, ProjectOverview, RunPlan, RunResult } from "./types.js";
 
 export interface ArtifactLayout {
   root: string;
   inventory: string;
+  overview: string;
   plans: string;
   generatedTests: string;
   runs: string;
@@ -31,6 +32,7 @@ export function createArtifactLayout(directory: string): ArtifactLayout {
   return {
     root,
     inventory: path.join(root, "inventory.json"),
+    overview: path.join(root, "overview.json"),
     plans: path.join(root, "plans"),
     generatedTests: path.join(root, "generated-tests"),
     runs: path.join(root, "runs"),
@@ -117,6 +119,21 @@ export class ArtifactStore {
 
   async readInventory(): Promise<Inventory> {
     return readJsonFile<Inventory>(this.layout.inventory);
+  }
+
+  async writeOverview(overview: ProjectOverview): Promise<string> {
+    await writeJsonFile(this.layout.overview, overview);
+    return this.layout.overview;
+  }
+
+  async readOverview(): Promise<ProjectOverview> {
+    return readJsonFile<ProjectOverview>(this.layout.overview);
+  }
+
+  /** Overview is optional; absent file yields undefined instead of throwing. */
+  async readOverviewIfExists(): Promise<ProjectOverview | undefined> {
+    if (!(await pathExists(this.layout.overview))) return undefined;
+    return this.readOverview();
   }
 
   async writePlan(plan: RunPlan, kind?: PlanArtifactKind): Promise<string> {

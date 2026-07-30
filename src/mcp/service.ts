@@ -698,7 +698,8 @@ export class McpService {
       runResult = await store.readRunResult(resolvedRunId);
       plan = await store.readPlan(runResult.planId, 'approved');
     }
-    const result = await writeProjectReport({ config, inventory, scenarios, runResult, plan });
+    const overview = await store.readOverviewIfExists();
+    const result = await writeProjectReport({ config, inventory, scenarios, runResult, plan, overview });
     return {
       rootDir: result.rootDir,
       indexHtmlPath: result.indexHtmlPath,

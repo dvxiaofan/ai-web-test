@@ -92,6 +92,66 @@ Use `--json` for AI assistants and CI. Every plan and run has a digest, so a
 report can be traced back to its exact inventory, policy, scope, roles, and
 browser profiles.
 
+## Targets without source access (black-box)
+
+Static discovery needs a source tree. When only a URL and credentials are
+available, switch the target to `runtime-first`: the inventory is seeded from
+`baseUrl` and filled in by browser exploration instead of AST analysis.
+
+```jsonc
+{
+  "target": {
+    "baseUrl": "https://app.example.com",   // required in this mode
+    "discovery": "runtime-first",
+    "seedPaths": ["/login", "/orders"]       // optional extra entry points
+  }
+}
+```
+
+```bash
+npm run aitest -- discover --config aitest.config.json
+# or, without touching the config:
+npm run aitest -- discover --config aitest.config.json --runtime-only
+```
+
+Configure `auth.roles` first: behind a login wall an unauthenticated crawl only
+ever reaches the login page.
+
+Exploration cannot reach deep links that were never navigated to, nor APIs that
+were never triggered. Top the inventory up with a structured supplement instead
+of hand-editing `inventory.json`:
+
+```jsonc
+// supplement.json
+{
+  "source": "ai",
+  "modules": [
+    { "name": "Ticket square", "description": "public ticket pool",
+      "routes": ["/square"], "apis": [{ "method": "GET", "path": "/api/square" }] }
+  ],
+  "routes": [{ "path": "/profile", "module": "Account", "requiresAuth": true }]
+}
+```
+
+```bash
+npm run aitest -- inventory merge --config aitest.config.json --file supplement.json
+```
+
+Merged nodes are tagged `externally-supplied` and carry `ai`/`operator`
+evidence, so they stay distinguishable from discovered facts. Invalid entries
+are skipped and reported as warnings rather than failing the batch.
+
+To measure what a black-box pass missed, compare it against a source-derived
+baseline for the same target:
+
+```bash
+npm run aitest -- inventory diff --base static/inventory.json --compare blackbox/inventory.json
+```
+
+The diff matches nodes by business identity (module name, route path,
+method + path) rather than node id, and reports per-kind recall plus the exact
+missing and extra entries.
+
 ## AI assistant integration
 
 AI Web Test is useful with an external AI assistant even when no model API is
@@ -163,7 +223,49 @@ test-<project>/
 
 - `index.html` is the required first document: it lists every discovered
   business module with its routes/pages/APIs/scenarios and links to each module
-  report. Generated from `inventory.json` (no run required).
+  report. Generated from `inventory.json` (no run required). It renders, in
+  order: project facts, coverage stats, the module table, the defect pool
+  (findings from `inventory.json` plus the latest run, worst severity first),
+  end-to-end flows, next steps, the acceptance checklist and staged
+  conclusions. Sections without data are omitted rather than left empty.
+
+### Feeding the overview
+
+Two inputs enrich `index.html`; both are optional.
+
+**Static project facts** — `metadata.overview` in the config. These are inputs
+that only change when the target changes:
+
+```jsonc
+{
+  "metadata": {
+    "overview": {
+      "intro": "IT service ticketing platform",
+      "techStack": "Vue 3 + Spring Boot",
+      "conventions": ["read-only account must not submit tickets"],
+      "businessSystems": ["ITR-GD", "ITR-SZ"],
+      "accounts": [{ "role": "admin", "note": "injected from env" }]
+    }
+  }
+}
+```
+
+**Test narrative** — `overview.json` in the artifact directory, written during
+testing and read automatically by `report` / `awt_project_report`:
+
+```jsonc
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-07-30T00:00:00.000Z",
+  "e2eFlows": [
+    { "name": "create → assign → close", "steps": ["create", "assign", "close"],
+      "status": "passed", "scenarioIds": ["sc_1"] }
+  ],
+  "nextSteps": [{ "priority": "high", "text": "cover the permission matrix" }],
+  "acceptance": [{ "item": "smoke passes on every module", "done": false }],
+  "conclusions": [{ "at": "2026-07-30T00:00:00.000Z", "text": "first regression done" }]
+}
+```
 - Each tested module gets its own subdirectory containing `module.html`. The
   report describes the test business, every step (with an inline screenshot when
   `--step-screenshots` was used during `run`), the final result, and any problems
