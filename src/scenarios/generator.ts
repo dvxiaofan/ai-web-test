@@ -31,7 +31,7 @@ function buildRouteScenario(
   route: RouteInventoryNode,
   options: GenerateSmokeScenariosOptions,
 ): TestScenario {
-  const id = stableId('scenario', `${inventory.project.id}:route-smoke:${route.path}`);
+  const id = stableId('scenario', `${inventory.project.id}:route-smoke:${route.id}`);
   const evidence: EvidenceRef[] = route.evidence.map((item) => ({ ...item }));
   const steps: TestScenario['steps'] = [
     {
