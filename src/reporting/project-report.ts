@@ -2,6 +2,8 @@ import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { ProjectConfig } from "../core/config.js";
+import { ensureSelfIgnoringGitignore } from "../core/artifacts.js";
+import { slugifyName } from "../core/ids.js";
 import type {
   ArtifactRef,
   Finding,
@@ -47,13 +49,7 @@ function escapeHtml(value: string): string {
 }
 
 export function slugify(name: string): string {
-  return (
-    name
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "module"
-  );
+  return slugifyName(name, "module");
 }
 
 /**
@@ -637,6 +633,7 @@ export async function writeProjectReport(input: ProjectReportInput): Promise<Pro
   void plan;
   const rootDir = resolveProjectReportDir(config);
   await mkdir(rootDir, { recursive: true });
+  await ensureSelfIgnoringGitignore(rootDir);
 
   const modules = inventory.nodes.filter((node) => node.kind === "module");
   const metas = moduleMetas(inventory, scenarios);

@@ -7,7 +7,7 @@
     "startCommand": "npm start"
   },
   "artifacts": {
-    "directory": "../.ai-web-test/sample-shop"
+    "directory": "../test-output/sample-shop/artifacts"
   },
   "source": {
     "include": ["src", "server.mjs"],

@@ -44,6 +44,20 @@ export function normalizeIdPrefix(namespace: string): string {
   return normalized;
 }
 
+/**
+ * Filesystem-safe slug for directory names derived from human-facing names.
+ * CJK characters are kept so Chinese project/module names stay readable.
+ */
+export function slugifyName(name: string, fallback = "project"): string {
+  return (
+    name
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9一-龥]+/g, "-")
+      .replace(/^-+|-+$/g, "") || fallback
+  );
+}
+
 function normalizeJson(value: unknown, seen: WeakSet<object>, path: string): JsonValue {
   if (value === null || typeof value === "string" || typeof value === "boolean") {
     return value;

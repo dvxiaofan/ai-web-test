@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -47,11 +47,31 @@ describe("configuration", () => {
     );
 
     expect(config.target.rootDir).toBe("/tmp/ai-web-test-config/sample");
-    expect(config.artifacts.directory).toBe("/tmp/ai-web-test-config/sample/.ai-web-test");
+    expect(config.artifacts.directory).toBe("/tmp/ai-web-test-config/test-output/sample/artifacts");
     expect(config.runtime.enabled).toBe(true);
     expect(config.policy.maxRisk).toBe("read");
     expect(config.policy.allowedHosts).toEqual(["localhost"]);
     expect(config.digest).toHaveLength(64);
+  });
+
+  it("keeps default artifacts out of the target source tree and slugs project names", () => {
+    const config = validateConfig(
+      { project: { name: "烽火 IT 工单" }, target: { rootDir: "./sample", baseUrl: "http://localhost:4173" } },
+      { configDir: "/tmp/ai-web-test-config" },
+    );
+
+    expect(config.artifacts.directory).toBe("/tmp/ai-web-test-config/test-output/烽火-it-工单/artifacts");
+    expect(config.artifacts.directory.startsWith(config.target.rootDir)).toBe(false);
+    expect(config.source.exclude).toContain("test-output");
+  });
+
+  it("resolves an explicit artifacts.directory relative to the config directory", () => {
+    const config = validateConfig(
+      { target: { rootDir: "./sample" }, artifacts: { directory: "artifacts" } },
+      { configDir: "/tmp/ai-web-test-config" },
+    );
+
+    expect(config.artifacts.directory).toBe("/tmp/ai-web-test-config/artifacts");
   });
 
   it("rejects embedded secrets and unbounded destructive execution", () => {
@@ -89,5 +109,18 @@ describe("ArtifactStore", () => {
     await expect(store.readJson("cache/example.json")).resolves.toEqual({ ok: true });
     expect(() => store.resolve("../escape.json")).toThrow(/escapes/);
     expect(store.relative(store.resolve("cache/example.json"))).toBe("cache/example.json");
+  });
+
+  it("writes a self-ignoring .gitignore once and never clobbers an existing one", async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "ai-web-test-core-"));
+    temporaryDirectories.push(directory);
+    const store = new ArtifactStore(directory);
+
+    await store.initialize();
+    expect(await readFile(path.join(directory, ".gitignore"), "utf8")).toBe("*\n");
+
+    await writeFile(path.join(directory, ".gitignore"), "runs/\n", "utf8");
+    await store.initialize();
+    expect(await readFile(path.join(directory, ".gitignore"), "utf8")).toBe("runs/\n");
   });
 });

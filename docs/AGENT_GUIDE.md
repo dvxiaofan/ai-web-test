@@ -6,7 +6,9 @@ assistant that operates AI Web Test.
 ## Safe operating loop
 
 1. Read the target config and verify the base URL is a test environment.
-2. Run `aitest discover --json`.
+   Configs live at `test-output/<project>/config.json`; every command accepts
+   `--project <name>` as shorthand for that path.
+2. Run `aitest discover --project <name> --json`.
 3. Read `inventory.json` and summarize discovered pages, APIs, roles, findings,
    and unresolved items.
 4. Ask the operator to choose or confirm a scope unless a named CI preset was
@@ -24,8 +26,10 @@ assistant that operates AI Web Test.
     unresolved. Do not edit the target project automatically.
 12. Produce the human-facing deliverable with `aitest report --by-module`
     (or MCP `awt_project_report`). Its output structure is a hard contract:
-    - The top-level `test-<project>` directory's first document MUST be
-      `index.html` — the global analysis of every discovered business module.
+    - The report directory (`test-output/<project>/report/` for init-generated
+      configs, a `test-<project>` directory beside the artifacts otherwise) MUST
+      have `index.html` as its first document — the global analysis of every
+      discovered business module.
     - Each tested module MUST get its own subdirectory named after the module,
       containing `module.html` (business, steps with inline screenshots, final
       result, and problems found).

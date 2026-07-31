@@ -77,24 +77,38 @@ available for discovery, planning, execution, and reporting.
 
 ## 3. Artifact layout
 
-By default, each target gets an isolated workspace:
+By default, each target gets an isolated workspace under the tool-side
+`test-output/` directory (never inside the target source tree). The workspace
+root and every generated artifacts/report directory receive a self-ignoring
+`.gitignore`, so target-project data cannot leak into version control:
 
 ```text
-.ai-web-test/
-├── inventory.json
-├── plans/
-│   ├── proposed-<timestamp>.json
-│   └── approved-<timestamp>.json
-├── generated-tests/
-├── runs/<run-id>/
-│   ├── result.json
-│   ├── report.html
-│   ├── screenshots/
-│   ├── traces/
-│   └── logs/
-├── cache/
-└── visual-baselines/
+test-output/
+└── <project>/
+    ├── config.json           # aitest config for this target (machine-local)
+    ├── artifacts/
+    │   ├── inventory.json
+    │   ├── overview.json
+    │   ├── scenarios.json
+    │   ├── plans/
+    │   │   ├── proposed-<id>.json
+    │   │   └── approved-<id>.json
+    │   ├── generated-tests/
+    │   ├── runs/<run-id>/
+    │   │   ├── result.json
+    │   │   ├── report.html
+    │   │   ├── screenshots/
+    │   │   ├── traces/
+    │   │   └── logs/
+    │   ├── auth/                 # saved storage states per role
+    │   ├── cache/
+    │   └── visual-baselines/
+    └── report/               # human-facing report tree (index.html + modules)
 ```
+
+Configs may still point `artifacts.directory` and `report.projectDirectory`
+anywhere; the self-ignoring `.gitignore` follows the directories, not the
+default names.
 
 ## 4. Execution scopes
 

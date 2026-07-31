@@ -8,6 +8,8 @@ coverage/
 
 # AI Web Test runtime artifacts (may contain URLs, screenshots, traces, and
 # other target-project data; never commit these by default)
+# test-output/ is the per-target workspace: test-output/<project>/{config.json,artifacts,report}
+test-output/
 .ai-web-test/
 .tmp-e2e-runs/
 playwright-report/

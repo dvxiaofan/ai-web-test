@@ -22,7 +22,9 @@
         "workingDirectory": { "type": "string" },
         "environment": { "type": "string" },
         "env": { "type": "object", "additionalProperties": { "type": "string" } },
-        "allowProductionLikeHost": { "type": "boolean" }
+        "allowProductionLikeHost": { "type": "boolean" },
+        "discovery": { "enum": ["static", "runtime-first"] },
+        "seedPaths": { "$ref": "#/$defs/stringArray" }
       },
       "additionalProperties": false
     },

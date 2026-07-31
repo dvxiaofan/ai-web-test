@@ -40,21 +40,39 @@ npm install
 npx playwright install chromium
 npm run build
 
-# Create a config for an existing project
+# Create a per-target workspace: test-output/<project>/{config.json, artifacts/, report/}
 npm run aitest -- init ../my-web-app
+# No source access? Initialize a runtime-first (black-box) target instead:
+npm run aitest -- init --url https://app.example.com --name my-web-app
 
 # First run: source inventory + safe, observation-only browser discovery.
 # Add --start only when you explicitly authorize the configured start command.
-npm run aitest -- discover --config ai-web-test.config.json --start
+npm run aitest -- discover --project my-web-app --start
 
 # Generate a plan. With a terminal and no --scope this asks the operator
 # whether to run smoke, a module, selected scenarios, affected coverage, or all.
-npm run aitest -- plan --config ai-web-test.config.json
+npm run aitest -- plan --project my-web-app
 
 # Explicitly approve the proposed plan, then execute it.
-npm run aitest -- approve --config ai-web-test.config.json
-npm run aitest -- run --config ai-web-test.config.json
+npm run aitest -- approve --project my-web-app
+npm run aitest -- run --project my-web-app
 ```
+
+Every target gets one isolated workspace under `test-output/`, so the tool
+repository never accumulates target-project data:
+
+```text
+test-output/                  # gitignored as a whole; also self-ignored
+  <project>/
+    config.json               # the aitest config for this target
+    artifacts/                # inventory, plans, runs, cache, auth states
+    report/                   # human-facing report tree (index.html + modules)
+```
+
+`--project <name>` is shorthand for `--config test-output/<name>/config.json`.
+The tool also drops a self-ignoring `.gitignore` into every artifacts and
+report directory it creates, so outputs stay out of version control even when
+the workspace is moved or a custom directory is configured.
 
 The sample app can be used without a framework or external backend:
 
@@ -97,6 +115,8 @@ browser profiles.
 Static discovery needs a source tree. When only a URL and credentials are
 available, switch the target to `runtime-first`: the inventory is seeded from
 `baseUrl` and filled in by browser exploration instead of AST analysis.
+`aitest init --url <baseUrl> --name <project>` (no target directory) generates
+exactly this kind of config.
 
 ```jsonc
 {
@@ -210,8 +230,10 @@ See [release readiness](docs/READINESS.md), [Product requirements](docs/PRODUCT.
 ## Project report tree (human-facing)
 
 When a human-readable deliverable is needed, `aitest report --by-module` (or the
-MCP tool `awt_project_report`) builds a self-contained `test-<project>` directory
-next to the artifact workspace:
+MCP tool `awt_project_report`) builds a self-contained report directory. For
+`init`-generated configs this is `test-output/<project>/report/`; without a
+`report.projectDirectory` override it defaults to a `test-<project>` directory
+beside the artifact workspace:
 
 ```text
 test-<project>/
@@ -288,4 +310,5 @@ src/ai/            provider-neutral planning and triage adapters
 fixtures/          self-contained sample target application
 tests/             unit and integration tests for the tool
 docs/              design, security, configuration, and agent guidance
+test-output/       per-target workspaces (gitignored; created by aitest init)
 ```

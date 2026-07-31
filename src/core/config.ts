@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import { contentDigest, stableId } from "./ids.js";
+import { contentDigest, slugifyName, stableId } from "./ids.js";
 import { readJsonFile } from "./json.js";
 import { createDefaultPolicy, mergeTestPolicy } from "./policy.js";
 import type {
@@ -407,15 +407,22 @@ function buildConfig(input: ProjectConfigInput, options: ConfigValidationOptions
     : stableId("project", rootDir);
 
   const rawArtifacts = isRecord(input.artifacts) ? input.artifacts : {};
+  // Default artifacts live under the tool-side test-output/<project>/ workspace
+  // (next to the config), never inside the target source tree.
   const artifacts: ArtifactConfig = {
-    directory: path.resolve(configDir, typeof rawArtifacts.directory === "string" ? rawArtifacts.directory : path.join(rootDir, ".ai-web-test")),
+    directory: path.resolve(
+      configDir,
+      typeof rawArtifacts.directory === "string"
+        ? rawArtifacts.directory
+        : path.join("test-output", slugifyName(projectName), "artifacts"),
+    ),
     retainRuns: typeof rawArtifacts.retainRuns === "number" ? rawArtifacts.retainRuns : 20,
   };
 
   const rawSource = isRecord(input.source) ? input.source : {};
   const source: SourceConfig = {
     include: cloneStringArray(rawSource.include, ["."]),
-    exclude: cloneStringArray(rawSource.exclude, ["node_modules", ".git", "dist", "build", "coverage", ".ai-web-test"]),
+    exclude: cloneStringArray(rawSource.exclude, ["node_modules", ".git", "dist", "build", "coverage", ".ai-web-test", "test-output"]),
     maxFiles: typeof rawSource.maxFiles === "number" ? rawSource.maxFiles : 20_000,
     maxFileSizeBytes: typeof rawSource.maxFileSizeBytes === "number" ? rawSource.maxFileSizeBytes : 2 * 1024 * 1024,
     followSymlinks: rawSource.followSymlinks === true,

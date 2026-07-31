@@ -41,6 +41,18 @@ export function createArtifactLayout(directory: string): ArtifactLayout {
 }
 
 /**
+ * Outputs may contain target-project data (internal URLs, cookies, screenshots,
+ * traces). A self-ignoring .gitignore keeps them out of version control no
+ * matter where the workspace is placed or renamed. An existing .gitignore is
+ * left untouched.
+ */
+export async function ensureSelfIgnoringGitignore(directory: string): Promise<void> {
+  const target = path.join(directory, ".gitignore");
+  if (await pathExists(target)) return;
+  await writeFile(target, "*\n", "utf8");
+}
+
+/**
  * Safe access to the per-target artifact workspace.
  *
  * All relative paths are checked to ensure callers cannot escape the configured
@@ -65,6 +77,7 @@ export class ArtifactStore {
       mkdir(this.layout.runs, { recursive: true }),
       mkdir(this.layout.cache, { recursive: true }),
     ]);
+    await ensureSelfIgnoringGitignore(this.layout.root);
     return this.layout;
   }
 

@@ -25,15 +25,25 @@ npm install
 npx playwright install chromium
 npm run build
 
+# 有源码的项目：
 npm run aitest -- init ../目标项目目录 \
   --url http://127.0.0.1:3000 \
   --start "npm run dev"
+# 没有源码、只有页面地址的项目（runtime-first 黑盒模式）：
+npm run aitest -- init --url http://127.0.0.1:3000 --name 项目名
 
-npm run aitest -- discover --start
-npm run aitest -- plan
-npm run aitest -- approve --plan <计划ID>
-npm run aitest -- run --plan <计划ID>
+npm run aitest -- discover --project 项目名 --start
+npm run aitest -- plan --project 项目名
+npm run aitest -- approve --project 项目名 --plan <计划ID>
+npm run aitest -- run --project 项目名 --plan <计划ID>
 ```
+
+`init` 会为每个被测项目在工具目录下建立独立工作区
+`test-output/<项目名>/`，包含 `config.json`（该项目的配置）、`artifacts/`
+（清单、计划、运行记录）和 `report/`（人类可读报告）。`--project <项目名>`
+是 `--config test-output/<项目名>/config.json` 的简写。`test-output/` 整体
+被 git 忽略，工具还会在每个产物目录内自动写入自忽略的 `.gitignore`，
+确保被测项目的数据（截图、内网地址、登录态）不会进入版本库。
 
 如果执行 `plan` 时没有传入范围，工具会询问操作者选择：
 
@@ -80,15 +90,18 @@ npm run aitest -- plan --scope module --module user-center
 Codex 等 AI 助手应使用 `--json`，读取以下产物：
 
 ```text
-.ai-web-test/
-├── inventory.json
-├── scenarios.json
-├── plans/
-└── runs/<run-id>/
-    ├── result.json
-    ├── report.html
-    ├── screenshots/
-    └── traces/
+test-output/<项目名>/
+├── config.json
+├── artifacts/
+│   ├── inventory.json
+│   ├── scenarios.json
+│   ├── plans/
+│   └── runs/<run-id>/
+│       ├── result.json
+│       ├── report.html
+│       ├── screenshots/
+│       └── traces/
+└── report/
 ```
 
 完整字段参考 [配置说明](CONFIGURATION.md)、[AI助手指南](AGENT_GUIDE.md)、

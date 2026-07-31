@@ -9,9 +9,11 @@ import { pathToFileURL } from 'node:url';
 import {
   ArtifactStore,
   ConfigValidationError,
+  ensureSelfIgnoringGitignore,
   loadConfig,
   pathExists,
   readJsonFile,
+  slugifyName,
   writeJsonFile,
   type BrowserProfile,
   type Inventory,
@@ -135,22 +137,41 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 
 async function commandInit(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
   const cwd = process.cwd();
-  const configPath = path.resolve(cwd, getStringOption(args, 'config') ?? DEFAULT_CONFIG_NAME);
+  const targetArgument = args.positionals[0] ?? getStringOption(args, 'target');
+  const urlOption = getStringOption(args, 'url');
+  // URL without a source tree switches to runtime-first (black-box) discovery.
+  const runtimeFirst = getBooleanOption(args, 'runtime-first') || (targetArgument === undefined && urlOption !== undefined);
+  if (runtimeFirst && !urlOption) {
+    throw new Error('Runtime-first init needs --url <baseUrl>; there is no source tree to discover from.');
+  }
+  const targetRoot = runtimeFirst ? undefined : path.resolve(cwd, targetArgument ?? '.');
+  const baseUrl = urlOption ?? 'http://localhost:3000';
+  const projectName =
+    getStringOption(args, 'name') ??
+    (targetRoot ? path.basename(targetRoot) || 'web-project' : slugifyName(new URL(baseUrl).hostname));
+  const slug = slugifyName(projectName);
+
+  const explicitConfig = getStringOption(args, 'config');
+  const configPath = path.resolve(cwd, explicitConfig ?? path.join('test-output', slug, 'config.json'));
   if (await pathExists(configPath) && !getBooleanOption(args, 'force')) {
     throw new Error(`Config already exists at ${configPath}. Use --force to replace it.`);
   }
-  const targetArgument = args.positionals[0] ?? getStringOption(args, 'target') ?? '.';
-  const targetRoot = path.resolve(cwd, targetArgument);
-  const relativeTarget = path.relative(path.dirname(configPath), targetRoot) || '.';
-  const projectName = getStringOption(args, 'name') ?? (path.basename(targetRoot) || 'web-project');
-  const baseUrl = getStringOption(args, 'url') ?? 'http://localhost:3000';
+
+  // Everything for one target lives in one directory: config.json beside the
+  // artifacts/ and report/ it produces. rootDir stays absolute because the
+  // workspace is machine-local (never committed) and must survive moves of the
+  // workspace itself.
   const startCommand = getStringOption(args, 'start') ?? 'npm run dev';
+  const target = runtimeFirst
+    ? { baseUrl, discovery: 'runtime-first' as const }
+    : { rootDir: targetRoot, baseUrl, startCommand };
   const config = {
     schemaVersion: 1,
     project: { name: projectName },
-    target: { rootDir: relativeTarget, baseUrl, startCommand },
-    artifacts: { directory: path.join('.ai-web-test', projectName) },
-    source: { exclude: ['node_modules', '.git', 'dist', 'build', 'coverage', '.ai-web-test'] },
+    target,
+    artifacts: { directory: 'artifacts' },
+    report: { projectDirectory: 'report' },
+    source: { exclude: ['node_modules', '.git', 'dist', 'build', 'coverage', '.ai-web-test', 'test-output'] },
     runtime: {
       enabled: true,
       headless: true,
@@ -166,15 +187,28 @@ async function commandInit(args: ReturnType<typeof parseCliArgs>, output: CliOut
     ai: { enabled: false, sendSource: false, sendScreenshots: false },
   };
   await writeJsonFile(configPath, config);
+  const defaultLayout = explicitConfig === undefined;
+  if (defaultLayout) {
+    // The shared test-output/ workspace holds per-target configs and outputs;
+    // none of it belongs in version control.
+    await ensureSelfIgnoringGitignore(path.resolve(cwd, 'test-output'));
+  }
   const relativeConfig = path.relative(cwd, configPath);
-  output.setContext({ projectId: deriveProjectId({ baseUrl, rootDir: targetRoot }) });
+  output.setContext({ projectId: deriveProjectId({ baseUrl, rootDir: targetRoot ?? path.dirname(configPath) }) });
   output.result({
     configPath,
-    targetRoot,
-    next: [
-      `aitest discover --config ${relativeConfig} --static-only`,
-      `aitest discover --config ${relativeConfig} --start`,
-    ],
+    projectName,
+    mode: runtimeFirst ? 'runtime-first' : 'static',
+    ...(targetRoot !== undefined ? { targetRoot } : {}),
+    next: defaultLayout
+      ? [
+          `aitest discover --project ${slug}${runtimeFirst ? '' : ' --static-only'}`,
+          `aitest plan --project ${slug}`,
+        ]
+      : [
+          `aitest discover --config ${relativeConfig} --static-only`,
+          `aitest discover --config ${relativeConfig} --start`,
+        ],
   }, 'initialized');
 }
 
@@ -638,9 +672,21 @@ async function commandAuth(args: ReturnType<typeof parseCliArgs>, output: CliOut
   }
 }
 
+/**
+ * Config resolution order: explicit --config path, then the --project shorthand
+ * (test-output/<project>/config.json), then the legacy default name in cwd.
+ * Exported for tests.
+ */
+export function resolveConfigPath(args: ReturnType<typeof parseCliArgs>): string {
+  const explicit = getStringOption(args, 'config');
+  if (explicit) return path.resolve(process.cwd(), explicit);
+  const project = getStringOption(args, 'project');
+  if (project) return path.resolve(process.cwd(), 'test-output', slugifyName(project), 'config.json');
+  return path.resolve(process.cwd(), DEFAULT_CONFIG_NAME);
+}
+
 async function readConfig(args: ReturnType<typeof parseCliArgs>): Promise<ProjectConfig> {
-  const configPath = path.resolve(process.cwd(), getStringOption(args, 'config') ?? DEFAULT_CONFIG_NAME);
-  return loadConfig(configPath);
+  return loadConfig(resolveConfigPath(args));
 }
 
 async function readScenarioCatalog(store: ArtifactStore, inventory: Inventory, allowSecretPersistence = false): Promise<TestScenario[]> {
@@ -868,9 +914,9 @@ function metadataFailedRequests(value: unknown): Array<{ method: string; url: st
 }
 
 async function commandMcp(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
-  const configPath = path.resolve(process.cwd(), getStringOption(args, 'config') ?? DEFAULT_CONFIG_NAME);
+  const configPath = resolveConfigPath(args);
   if (!(await pathExists(configPath))) {
-    throw new Error(`Config not found at ${configPath}. Use --config to specify its path.`);
+    throw new Error(`Config not found at ${configPath}. Use --config or --project to specify it.`);
   }
   // The MCP server exchanges JSON-RPC over stdio; never write human output to
   // stdout here or the protocol stream would be corrupted.
@@ -959,7 +1005,8 @@ function helpText(): string {
   return `AI Web Test — discover first, approve second, execute last
 
 Commands:
-  init [target]                       Create a safe config template
+  init [target]                       Create a config under test-output/<project>/ (source-tree mode)
+  init --url <baseUrl> --name <n>     Same, without source access (runtime-first black-box mode)
   discover                            Analyze source and optionally observe the running site
   plan --scope <mode>                 Propose full/module/route/scenario/smoke/affected plan
   ai-plan                             Ask the configured AI provider for advisory business scenarios
@@ -980,6 +1027,7 @@ Commands:
   retention [--max-runs N] [--max-age-days N] [--pinned <ids>] [--dry-run]   Prune old artifacts
 
 Common options:
+  --project <name>                    Shorthand for --config test-output/<name>/config.json
   --config <path>                     Config path (default: ai-web-test.config.json)
   --json                              Emit machine-readable JSON
   --non-interactive                   Never prompt; safe scope is smoke
@@ -994,8 +1042,9 @@ Common options:
 
 Examples:
   aitest init ../my-app
-  aitest discover
-  aitest plan                         Ask the operator to choose the first scope
+  aitest init --url http://10.0.0.5:9090 --name my-app
+  aitest discover --project my-app
+  aitest plan --project my-app        Ask the operator to choose the first scope
   aitest plan --scope module --module orders
   aitest approve --plan <id>
   aitest run --plan <id>
