@@ -203,7 +203,7 @@ function moduleMetas(inventory: Inventory, scenarios: TestScenario[]): Map<strin
     const pageIds = inventory.nodes
       .filter((n) => n.kind === "page" && (n as { moduleId?: string }).moduleId === node.id)
       .map((n) => n.id);
-    const scenarioCount = scenarios.filter((s) => s.moduleIds[0] === node.id).length;
+    const scenarioCount = scenarios.filter((s) => (s.moduleIds ?? []).includes(node.id)).length;
     map.set(node.id, { node, routeIds, apiIds, pageIds, scenarioCount });
   }
   return map;
@@ -436,6 +436,45 @@ function renderModuleTable(
   </table>`;
 }
 
+/** Localize auto-generated (English) finding text into Chinese for the report. */
+const A11Y_RULE_ZH: Record<string, string> = {
+  "empty-control-name": "控件缺少可访问名称",
+  "form-label": "表单控件缺少程序化标签",
+};
+const SKIP_REASON_ZH: Record<string, string> = {
+  hidden: "其为隐藏文件/目录",
+};
+
+function localizeFindingTitle(title: string): string {
+  const a11y = title.match(/^Accessibility issue on (.+?): (.+)$/);
+  if (a11y) {
+    const rule = A11Y_RULE_ZH[a11y[2]] ?? a11y[2];
+    return `可访问性问题（${a11y[1]}）：${rule}`;
+  }
+  const skip = title.match(/^Discovery skipped (.+)$/);
+  if (skip) return `发现阶段已跳过：${skip[1]}`;
+  return title;
+}
+
+function localizeFindingText(text: string): string {
+  if (!text) return text;
+  let out = text;
+  out = out.replace(
+    "Interactive control has no accessible name.",
+    "交互式控件缺少可访问名称（无障碍问题）。",
+  );
+  out = out.replace(
+    "Form control has no programmatic label.",
+    "表单控件缺少程序化标签（无障碍问题）。",
+  );
+  out = out.replace(
+    /^Entry was skipped because of (.+)\.$/,
+    (_m, reason: string) =>
+      `该条目因${SKIP_REASON_ZH[reason] ?? `「${reason}」`}而被跳过。`,
+  );
+  return out;
+}
+
 /** Section 5 — defect pool aggregated from inventory + run findings. */
 function renderFindingPool(
   findings: Finding[],
@@ -470,12 +509,14 @@ function renderFindingPool(
         .map((id) => moduleNameById.get(id) ?? scenarioNameById.get(id))
         .filter((value): value is string => Boolean(value));
       const relatedText = related.length ? escapeHtml([...new Set(related)].join("、")) : "—";
-      const detail = [finding.summary, finding.details].filter(Boolean).join(" — ");
+      const detail = [localizeFindingText(finding.summary), localizeFindingText(finding.details)]
+        .filter(Boolean)
+        .join(" — ");
       return `<tr>
         <td><span class="badge" style="background:${color}">${escapeHtml(
           SEVERITY_LABEL[severity] ?? severity,
         )}</span></td>
-        <td><b>${escapeHtml(finding.title ?? finding.id)}</b></td>
+        <td><b>${escapeHtml(localizeFindingTitle(finding.title ?? finding.id))}</b></td>
         <td>${escapeHtml(detail || "—")}</td>
         <td>${relatedText}</td>
         <td>${escapeHtml(FINDING_STATUS_LABEL[status] ?? status)}</td>
@@ -639,22 +680,23 @@ export async function writeProjectReport(input: ProjectReportInput): Promise<Pro
   const metas = moduleMetas(inventory, scenarios);
   const catalog = scenarioCatalogMap(scenarios);
 
-  // scenarioId -> moduleId
-  const scenarioModule = new Map<string, string>();
+  // scenarioId -> all moduleIds it touches (a scenario may exercise several modules)
+  const scenarioModules = new Map<string, string[]>();
   for (const scenario of scenarios) {
-    const moduleId = scenario.moduleIds[0];
-    if (moduleId) scenarioModule.set(scenario.id, moduleId);
+    const moduleIds = scenario.moduleIds ?? [];
+    if (moduleIds.length) scenarioModules.set(scenario.id, moduleIds);
   }
 
-  // Group run scenarios by module.
+  // Group run scenarios under every module they touch.
   const moduleScenarioResults = new Map<string, ScenarioResult[]>();
   if (runResult) {
     for (const sr of runResult.scenarios) {
-      const moduleId = scenarioModule.get(sr.scenarioId);
-      if (!moduleId) continue;
-      const list = moduleScenarioResults.get(moduleId) ?? [];
-      list.push(sr);
-      moduleScenarioResults.set(moduleId, list);
+      const moduleIds = scenarioModules.get(sr.scenarioId) ?? [];
+      for (const moduleId of moduleIds) {
+        const list = moduleScenarioResults.get(moduleId) ?? [];
+        list.push(sr);
+        moduleScenarioResults.set(moduleId, list);
+      }
     }
   }
 

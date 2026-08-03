@@ -1,0 +1,40 @@
+{
+  "$schema": "../schema/ai-web-test.config.schema.json",
+  "project": { "name": "sample-shop" },
+  "target": {
+    "rootDir": "../fixtures/sample-app",
+    "baseUrl": "http://127.0.0.1:4178",
+    "startCommand": "npm start"
+  },
+  "artifacts": {
+    "directory": "../test-output/sample-shop/artifacts"
+  },
+  "source": {
+    "include": ["src", "server.mjs"],
+    "exclude": ["node_modules", "dist", ".git"],
+    "maxFiles": 5000,
+    "maxFileSizeBytes": 524288
+  },
+  "runtime": {
+    "enabled": true,
+    "headless": true,
+    "profiles": [
+      { "id": "desktop-chromium", "browser": "chromium", "viewport": { "width": 1280, "height": 800 } }
+    ]
+  },
+  "roles": [
+    {
+      "id": "role_c65da2d503b825520bce",
+      "name": "admin",
+      "storageStatePath": "/Users/ccfun/Desktop/FH/test_code/ai-web-test/test-output/sample-shop/auth/admin.json",
+      "default": true
+    }
+  ],
+  "policy": {
+    "maxRisk": "read",
+    "allowedHosts": ["127.0.0.1"],
+    "allowExternalOrigins": false,
+    "confirmationRequired": true,
+    "destructiveActionAllowlist": []
+  }
+}

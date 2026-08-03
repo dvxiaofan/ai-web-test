@@ -21,12 +21,18 @@ The current implementation provides:
 
 - framework, route, API, page, and source-file discovery;
 - a persistent project inventory and coverage model;
+- a business inventory layer (entities, actions, rules, permissions, state
+  machines) derived from the same coordinates as the technical inventory;
 - interactive full/module/scenario test-plan selection;
 - Playwright browser exploration and deterministic execution;
+- role-aware authentication via UI, API, storage-state, or custom adapters;
 - HTML and JSON reports with screenshots, traces, and console/network evidence;
 - deterministic visual snapshots and basic accessibility/overflow audits;
+- deterministic failure classification with auditable, never auto-applied fix
+  proposals, plus historical trends, flaky detection, and artifact retention;
 - optional AI-provider adapters for planning and failure triage;
-- machine-readable CLI output for use by Codex and other AI assistants.
+- machine-readable CLI output and an MCP server (`awt_*` tools) for use by Codex
+  and other AI assistants.
 
 The only optional runtime dependency that is not needed for static discovery is
 the Playwright browser bundle. If a browser or its executable is unavailable,
@@ -109,6 +115,32 @@ npm run aitest -- run --plan <approved-plan-id> --update-baselines
 Use `--json` for AI assistants and CI. Every plan and run has a digest, so a
 report can be traced back to its exact inventory, policy, scope, roles, and
 browser profiles.
+
+## Operational commands
+
+Once a target has been discovered and run at least once:
+
+```bash
+npm run aitest -- status --project my-web-app        # inventory + coverage summary
+npm run aitest -- auth --project my-web-app --role admin   # log in, save storage state
+
+# Triage a failed run into deterministic failure classes (no test is auto-edited)
+npm run aitest -- healing --project my-web-app --run <run-id>
+# Review a proposed fix and record it as an auditable proposal
+npm run aitest -- healing --project my-web-app --run <run-id> --before old.ts --after new.ts
+
+npm run aitest -- trends --project my-web-app        # pass rate, coverage, flaky tests
+npm run aitest -- retention --project my-web-app --max-runs 20 --dry-run
+```
+
+Healing never rewrites a test on its own: it classifies failures and emits a
+reviewable, reversible proposal. Weakening an assertion or skipping a test to
+turn a run green is rejected.
+
+`aitest mcp` starts an MCP server over stdio, exposing the same operations as
+`awt_*` tools (`awt_discover`, `awt_plan`, `awt_approve`, `awt_run`,
+`awt_report`, `awt_project_report`, `awt_status`, `awt_business`,
+`awt_inventory_query`, `awt_scenarios_generate`, `awt_healing_*`).
 
 ## Targets without source access (black-box)
 
@@ -288,6 +320,7 @@ testing and read automatically by `report` / `awt_project_report`:
   "conclusions": [{ "at": "2026-07-30T00:00:00.000Z", "text": "first regression done" }]
 }
 ```
+
 - Each tested module gets its own subdirectory containing `module.html`. The
   report describes the test business, every step (with an inline screenshot when
   `--step-screenshots` was used during `run`), the final result, and any problems
@@ -300,15 +333,27 @@ Per-step screenshots require `run --step-screenshots`, which is gated by
 ## Repository layout
 
 ```text
-src/core/          durable schemas, policy, config, artifacts
+src/core/          durable schemas, config, policy, artifacts, stable digests
 src/discovery/     source walker, framework/routes/API analysis
 src/browser/       safe runtime exploration and evidence capture
+src/inventory/     coverage, queries, runtime/external merge, inventory diff
+src/business/      business inventory: entities, actions, rules, permissions, states
 src/planning/      scope selection, dependency closure, approval gate
-src/execution/     Playwright scenario executor
-src/reporting/     HTML and machine-readable result reports
+src/scenarios/     scenario generation, dedup, import, proposals, validation
+src/execution/     Playwright scenario executor, assertions, evidence, visual
+src/auth/          role authentication via UI, API, storage state, or custom adapter
+src/reporting/     HTML, Markdown, and machine-readable result reports
 src/ai/            provider-neutral planning and triage adapters
+src/healing/       failure classification and auditable fix proposals
+src/history/       trends, flaky detection, artifact retention
+src/testdata/      namespaced test data and cleanup
+src/runtime/       target process supervision
+src/agent/         project lifecycle state machine and agent response protocol
+src/mcp/           MCP server exposing the same operations as awt_* tools
+src/cli.ts         command dispatcher
 fixtures/          self-contained sample target application
 tests/             unit and integration tests for the tool
 docs/              design, security, configuration, and agent guidance
+schema/            JSON Schema for the config file (editor completion)
 test-output/       per-target workspaces (gitignored; created by aitest init)
 ```

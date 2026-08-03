@@ -1,0 +1,33 @@
+{
+  "$schema": "../schema/ai-web-test.config.schema.json",
+  "project": { "name": "sample-bb" },
+  "target": {
+    "baseUrl": "http://127.0.0.1:4178",
+    "discovery": "runtime-first",
+    "seedPaths": ["/login", "/products", "/orders", "/admin"]
+  },
+  "artifacts": {
+    "directory": "../test-output/sample-bb/artifacts"
+  },
+  "runtime": {
+    "enabled": true,
+    "headless": true,
+    "profiles": [
+      { "id": "desktop-chromium", "browser": "chromium", "viewport": { "width": 1280, "height": 800 } }
+    ]
+  },
+  "metadata": {
+    "overview": {
+      "intro": "黑盒模式（runtime-first）验证：仅提供 URL，无源码访问",
+      "techStack": "unknown (black-box)",
+      "conventions": ["只读账号不做写操作"]
+    }
+  },
+  "policy": {
+    "maxRisk": "read",
+    "allowedHosts": ["127.0.0.1"],
+    "allowExternalOrigins": false,
+    "confirmationRequired": true,
+    "destructiveActionAllowlist": []
+  }
+}
