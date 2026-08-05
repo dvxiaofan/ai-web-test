@@ -38,6 +38,7 @@ import {
   type HtmlReportModel,
 } from '../reporting/index.js';
 import { writeProjectReport } from '../reporting/project-report.js';
+import { runDoctor, type DoctorReport } from '../agent/doctor.js';
 import { withTargetProcess, type TargetProcessOptions } from '../runtime/index.js';
 import { classifyRunFailures } from '../healing/classifier.js';
 import { diffScenarios } from '../healing/semantic-diff.js';
@@ -472,6 +473,7 @@ export class McpService {
     allowVisualDiff?: boolean | undefined;
     captureTrace?: boolean | undefined;
     captureScreenshots?: boolean | undefined;
+    projectReport?: boolean | undefined;
   }): Promise<{
     status: RunResult['status'];
     runId: string;
@@ -479,6 +481,8 @@ export class McpService {
     reportPath: string;
     markdownPath: string;
     coverage: RunResult['coverage'];
+    projectReport?: { rootDir: string; indexHtmlPath: string; modules: number } | undefined;
+    projectReportError?: string | undefined;
   }> {
     const config = await this.loadConfig();
     const store = await this.store();
@@ -532,6 +536,20 @@ export class McpService {
     const markdownPath = store.runWorkspace(result.id).markdown;
     await writeMarkdownReport(reportModel, markdownPath);
 
+    // The by-module tree is the deliverable, so every run emits one. A failure
+    // is surfaced as a field rather than thrown: it must not mask the run status.
+    let projectReport: { rootDir: string; indexHtmlPath: string; modules: number } | undefined;
+    let projectReportError: string | undefined;
+    if (params.projectReport !== false) {
+      try {
+        const overview = await store.readOverviewIfExists();
+        const tree = await writeProjectReport({ config, inventory, scenarios, runResult: result, plan, overview });
+        projectReport = { rootDir: tree.rootDir, indexHtmlPath: tree.indexHtmlPath, modules: tree.modules.length };
+      } catch (error) {
+        projectReportError = error instanceof Error ? error.message : String(error);
+      }
+    }
+
     return {
       status: result.status,
       runId: result.id,
@@ -539,6 +557,8 @@ export class McpService {
       reportPath,
       markdownPath,
       coverage: result.coverage,
+      ...(projectReport !== undefined ? { projectReport } : {}),
+      ...(projectReportError !== undefined ? { projectReportError } : {}),
     };
   }
 
@@ -709,8 +729,17 @@ export class McpService {
     };
   }
 
-  // --- internal helpers ---------------------------------------------------
+  /**
+   * Audit the target's workspace for hand-written files that landed outside it
+   * and credentials inlined into the ones inside it — the part of the output
+   * contract that static enforcement cannot reach. Mirrors `aitest doctor`.
+   */
+  async doctor(args: { toolRoot?: string } = {}): Promise<DoctorReport> {
+    const config = await this.loadConfig();
+    return runDoctor(config, args.toolRoot ? { toolRoot: args.toolRoot } : {});
+  }
 
+  // --- internal helpers ---------------------------------------------------
   private async latestRunId(store: ArtifactStore): Promise<string | undefined> {
     try {
       const entries = await readdir(store.layout.runs);

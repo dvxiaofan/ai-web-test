@@ -114,11 +114,11 @@ function buildRunResult(shotHome: string, shotAdmin: string): RunResult {
 }
 
 describe("project-report", () => {
-  it("resolves the default test-<project> directory beside the artifacts dir", () => {
+  it("resolves the default report/ directory beside the artifacts dir", () => {
     const artifactsDir = tmp("artifacts");
     const config = buildConfig(artifactsDir);
     const resolved = resolveProjectReportDir(config);
-    expect(resolved).toBe(path.resolve(path.dirname(artifactsDir), "test-sample-shop"));
+    expect(resolved).toBe(path.resolve(path.dirname(artifactsDir), "report"));
   });
 
   it("honors an explicit report.projectDirectory override (relative to config dir)", () => {

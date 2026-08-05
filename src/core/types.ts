@@ -249,6 +249,17 @@ export type InventoryNode =
   | GuardInventoryNode
   | TestInventoryNode;
 
+/**
+ * Short aliases for the per-kind inventory nodes. The business inventory layer
+ * (`src/business/`) imports these names, and they read more naturally than the
+ * `*InventoryNode` form in narrowed type guards (`n is RouteNode`).
+ */
+export type ModuleNode = ModuleInventoryNode;
+export type RouteNode = RouteInventoryNode;
+export type ApiNode = ApiInventoryNode;
+export type PageNode = PageInventoryNode;
+export type RoleNode = RoleInventoryNode;
+
 export type InventoryRelationship =
   | "contains"
   | "renders"

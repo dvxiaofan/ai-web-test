@@ -29,9 +29,9 @@ export function createNamespace(input: CreateNamespaceInput): TestDataNamespace 
     name: input.name,
     moduleId: input.moduleId,
     scope: input.scope ?? "module",
-    ownerRoleId: input.ownerRoleId,
     records: input.records ?? [],
-    cleanupOrder: input.cleanupOrder,
+    ...(input.ownerRoleId !== undefined ? { ownerRoleId: input.ownerRoleId } : {}),
+    ...(input.cleanupOrder !== undefined ? { cleanupOrder: input.cleanupOrder } : {}),
   };
 }
 

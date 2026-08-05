@@ -5,6 +5,7 @@ import { blocked } from './outcome.js';
 import {
   authenticateWithUi,
   type BrowserAuthSurface,
+  type PostLoginStep,
   type UiAuthOptions,
 } from './ui-adapter.js';
 import { authenticateWithApi, type TokenClient } from './api-adapter.js';
@@ -72,6 +73,9 @@ function defaultUiOptions(target: RoleAuthConfig['target'], config: RoleAuthConf
     typeof meta[key] === 'string' ? (meta[key] as string) : fallback;
   const optional = (key: string): string | undefined =>
     typeof meta[key] === 'string' ? (meta[key] as string) : undefined;
+  const postLoginSteps = Array.isArray(meta['postLoginSteps'])
+    ? (meta['postLoginSteps'] as unknown as PostLoginStep[])
+    : undefined;
   return {
     loginUrl: target?.loginUrl ?? target?.baseUrl ?? '',
     usernameSelector: selector('usernameSelector', 'input[name="username"]'),
@@ -79,6 +83,7 @@ function defaultUiOptions(target: RoleAuthConfig['target'], config: RoleAuthConf
     submitSelector: selector('submitSelector', 'button[type="submit"]'),
     successIndicatorSelector: optional('successIndicatorSelector'),
     errorIndicatorSelector: optional('errorIndicatorSelector'),
+    ...(postLoginSteps ? { postLoginSteps } : {}),
   };
 }
 

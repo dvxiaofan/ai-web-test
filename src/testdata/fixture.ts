@@ -31,8 +31,8 @@ export function compileFixture(input: CompileFixtureInput): TestDataRecord[] {
     kind: r.kind,
     name: r.name,
     payload: r.payload,
-    ttlSeconds: r.ttlSeconds,
-    cleanup: r.cleanup,
+    ...(r.ttlSeconds !== undefined ? { ttlSeconds: r.ttlSeconds } : {}),
+    ...(r.cleanup !== undefined ? { cleanup: r.cleanup } : {}),
   }));
 }
 

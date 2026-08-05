@@ -4,6 +4,7 @@ import path from "node:path";
 import type { ProjectConfig } from "../core/config.js";
 import { ensureSelfIgnoringGitignore } from "../core/artifacts.js";
 import { slugifyName } from "../core/ids.js";
+import { resolveReportDir } from "../core/workspace.js";
 import type {
   ArtifactRef,
   Finding,
@@ -53,18 +54,15 @@ export function slugify(name: string): string {
 }
 
 /**
- * Resolve the top-level `test-<project>` report directory.
- * Defaults to a `test-<slug>` directory beside the artifact workspace; can be
- * overridden via `config.report.projectDirectory` (relative to the config dir).
+ * Resolve the top-level report directory: always `report/` beside the artifact
+ * workspace, so `test-output/<project>/{artifacts,report}` is the one shape
+ * every target produces. `config.report.projectDirectory` can rename it, but
+ * config validation keeps the override inside the project workspace.
+ *
+ * Re-exported from `core/workspace` so callers already holding a report model
+ * do not need a second import.
  */
-export function resolveProjectReportDir(config: ProjectConfig): string {
-  const override = config.report?.projectDirectory;
-  if (override && override.trim().length > 0) {
-    return path.resolve(config.configDir, override);
-  }
-  const base = path.dirname(config.artifacts.directory);
-  return path.resolve(base, `test-${slugify(config.project.name)}`);
-}
+export const resolveProjectReportDir = resolveReportDir;
 
 export interface ProjectReportInput {
   config: ProjectConfig;
@@ -448,7 +446,8 @@ const SKIP_REASON_ZH: Record<string, string> = {
 function localizeFindingTitle(title: string): string {
   const a11y = title.match(/^Accessibility issue on (.+?): (.+)$/);
   if (a11y) {
-    const rule = A11Y_RULE_ZH[a11y[2]] ?? a11y[2];
+    const key = a11y[2];
+    const rule = key ? (A11Y_RULE_ZH[key] ?? key) : "";
     return `可访问性问题（${a11y[1]}）：${rule}`;
   }
   const skip = title.match(/^Discovery skipped (.+)$/);
@@ -456,8 +455,8 @@ function localizeFindingTitle(title: string): string {
   return title;
 }
 
-function localizeFindingText(text: string): string {
-  if (!text) return text;
+function localizeFindingText(text: string | undefined): string {
+  if (!text) return "";
   let out = text;
   out = out.replace(
     "Interactive control has no accessible name.",

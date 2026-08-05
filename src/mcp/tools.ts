@@ -126,7 +126,7 @@ export function registerMcpTools(server: McpServer, service: McpService): void {
     MCP_TOOLS.run,
     {
       description:
-        'Execute an approved plan against the target and write the run result + HTML/Markdown report. Requires a running target or start=true.',
+        'Execute an approved plan against the target and write the run result + HTML/Markdown report, plus the by-module report tree under the project workspace. Requires a running target or start=true.',
       inputSchema: {
         planId: z.string().optional().describe('Plan id to run; defaults to the latest approved.'),
         start: z.boolean().optional().describe('Launch the target server before running.'),
@@ -134,6 +134,10 @@ export function registerMcpTools(server: McpServer, service: McpService): void {
         allowVisualDiff: z.boolean().optional().describe('Treat visual diffs as failures unless true.'),
         captureTrace: z.boolean().optional().describe('Capture Playwright traces.'),
         captureScreenshots: z.boolean().optional().describe('Capture screenshots on failure.'),
+        projectReport: z
+          .boolean()
+          .optional()
+          .describe('Build the by-module report tree after the run. Defaults to true; set false to skip.'),
       },
     },
     async (args) => {
@@ -305,6 +309,29 @@ export function registerMcpTools(server: McpServer, service: McpService): void {
         const params: { runId?: string } = {};
         if (typeof args.run === 'string' && args.run.length > 0) params.runId = args.run;
         return jsonResult(await service.projectReport(params));
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    MCP_TOOLS.doctor,
+    {
+      description:
+        "Audit the target's workspace: target-specific files that leaked outside it, a missing by-module report tree, and plaintext credentials in workspace files. Returns ok=false when any error-severity finding exists.",
+      inputSchema: {
+        toolRoot: z
+          .string()
+          .optional()
+          .describe('Directory scanned for leaked target files. Defaults to the current working directory.'),
+      },
+    },
+    async (args) => {
+      try {
+        const params: { toolRoot?: string } = {};
+        if (typeof args.toolRoot === 'string' && args.toolRoot.length > 0) params.toolRoot = args.toolRoot;
+        return jsonResult(await service.doctor(params));
       } catch (error) {
         return errorResult(error);
       }

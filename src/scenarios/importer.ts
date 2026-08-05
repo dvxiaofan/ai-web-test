@@ -1,6 +1,7 @@
 import type {
   ActionRisk,
   AssertionKind,
+  EvidenceRef,
   Inventory,
   JsonValue,
   ProposalSource,
@@ -113,9 +114,8 @@ function defaultConfidence(source: ProposalSource): number {
 function toScenario(proposal: ScenarioProposal, confidence: number): TestScenario {
   const steps = proposal.steps.map((step, index) => toScenarioStep(step, index, proposal.risk));
   const draft = {
-    schemaVersion: 1,
+    schemaVersion: 1 as 1,
     name: proposal.name,
-    description: proposal.description,
     source: SOURCE_MAP[proposal.source],
     confidence,
     moduleIds: proposal.moduleId ? [proposal.moduleId] : [],
@@ -125,8 +125,9 @@ function toScenario(proposal: ScenarioProposal, confidence: number): TestScenari
     tags: [...proposal.tags],
     risk: proposal.risk,
     steps,
-    evidence: [] as const,
+    evidence: [] as EvidenceRef[],
     createdAt: proposal.createdAt,
+    ...(proposal.description !== undefined ? { description: proposal.description } : {}),
   };
   // Drop undefined fields so the content digest is deterministic and JSON-safe.
   const clean = stripUndefined(draft);
@@ -165,50 +166,51 @@ function toScenarioStep(step: ScenarioProposal["steps"][number], index: number, 
   const source = step as ScenarioProposal["steps"][number] & Record<string, unknown>;
   const id = `step-${index + 1}`;
   const name = typeof source.name === "string" ? source.name : typeof source.target === "string" ? source.target : undefined;
+  const nameField: { name?: string } = name ? { name } : {};
 
   switch (step.action) {
     case "navigate":
       requireString(source.url, "navigate", "url");
-      return { id, name, risk, action: "navigate", url: String(source.url) };
+      return { ...nameField, id, risk, action: "navigate", url: String(source.url) };
     case "click":
       requireLocator(step, "click");
-      return { id, name, risk, action: "click", locator: step.locator! };
+      return { ...nameField, id, risk, action: "click", locator: step.locator! };
     case "fill":
       requireLocator(step, "fill");
       requireString(source.value, "fill", "value");
-      return { id, name, risk, action: "fill", locator: step.locator!, value: String(source.value) };
+      return { ...nameField, id, risk, action: "fill", locator: step.locator!, value: String(source.value) };
     case "select-option":
       requireLocator(step, "select-option");
       requireString(source.value, "select-option", "value");
-      return { id, name, risk, action: "select-option", locator: step.locator!, value: String(source.value) };
+      return { ...nameField, id, risk, action: "select-option", locator: step.locator!, value: String(source.value) };
     case "check":
       requireLocator(step, "check");
-      return { id, name, risk, action: "check", locator: step.locator! };
+      return { ...nameField, id, risk, action: "check", locator: step.locator! };
     case "uncheck":
       requireLocator(step, "uncheck");
-      return { id, name, risk, action: "uncheck", locator: step.locator! };
+      return { ...nameField, id, risk, action: "uncheck", locator: step.locator! };
     case "press":
       requireLocator(step, "press");
       requireString(source.key, "press", "key");
-      return { id, name, risk, action: "press", locator: step.locator!, key: String(source.key) };
+      return { ...nameField, id, risk, action: "press", locator: step.locator!, key: String(source.key) };
     case "wait":
-      return { id, name, risk, action: "wait" };
+      return { ...nameField, id, risk, action: "wait" };
     case "assert":
       requireString(source.assertion, "assert", "assertion");
       return {
+        ...nameField,
         id,
-        name,
         risk,
         action: "assert",
         assertion: String(source.assertion) as AssertionKind,
-        locator: step.locator,
-        expected: source.expected as JsonValue | undefined,
+        ...(step.locator ? { locator: step.locator } : {}),
+        ...(source.expected !== undefined ? { expected: source.expected as JsonValue } : {}),
       };
     case "screenshot":
-      return { id, name, risk, action: "screenshot" };
+      return { ...nameField, id, risk, action: "screenshot" };
     case "evaluate":
       requireString(source.expression, "evaluate", "expression");
-      return { id, name, risk, action: "evaluate", expression: String(source.expression) };
+      return { ...nameField, id, risk, action: "evaluate", expression: String(source.expression) };
     default:
       throw new TypeError(`Unsupported proposal step action '${step.action}'.`);
   }

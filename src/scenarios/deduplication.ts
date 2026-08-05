@@ -1,5 +1,5 @@
 import { stableStringify } from "../core/ids.js";
-import type { ProposalStep, ScenarioProposal, TestScenario } from "../core/types.js";
+import type { LocatorTarget, ScenarioProposal, TestScenario } from "../core/types.js";
 
 /**
  * Phase 3 — duplicate detection for scenarios and proposals.
@@ -10,10 +10,18 @@ import type { ProposalStep, ScenarioProposal, TestScenario } from "../core/types
  * re-discovered or re-proposed scenario is detected even with a different title.
  */
 
+/** Structural subset shared by ProposalStep and ScenarioStep — all scenarioSignature needs. */
+interface SignatureStep {
+  action: string;
+  locator?: LocatorTarget;
+  url?: string;
+  value?: string | string[];
+}
+
 export interface ScenarioSignatureInput {
-  routeId?: string;
+  routeId: string | undefined;
   roleIds: string[];
-  steps: ReadonlyArray<ProposalStep>;
+  steps: ReadonlyArray<SignatureStep>;
 }
 
 export interface DuplicateGroup<T> {

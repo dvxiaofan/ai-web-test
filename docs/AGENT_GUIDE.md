@@ -25,10 +25,11 @@ assistant that operates AI Web Test.
 11. Classify failures as confirmed, probable, environment, data, flaky, or
     unresolved. Do not edit the target project automatically.
 12. Produce the human-facing deliverable with `aitest report --by-module`
-    (or MCP `awt_project_report`). Its output structure is a hard contract:
-    - The report directory (`test-output/<project>/report/` for init-generated
-      configs, a `test-<project>` directory beside the artifacts otherwise) MUST
-      have `index.html` as its first document — the global analysis of every
+    (or MCP `awt_project_report`). `aitest run` already builds this tree at the
+    end of every run, so this step is a rebuild rather than a first build.
+    Its output structure is a hard contract:
+    - The report directory (`test-output/<project>/report/`) MUST have
+      `index.html` as its first document — the global analysis of every
       discovered business module.
     - Each tested module MUST get its own subdirectory named after the module,
       containing `module.html` (business, steps with inline screenshots, final
@@ -38,6 +39,34 @@ assistant that operates AI Web Test.
     - For step screenshots, the operator must run `aitest run --step-screenshots`
       (gated by `policy.allowSecretPersistence`); modules with no executed
       scenarios are omitted from the tree.
+13. Run `aitest doctor` (or MCP `awt_doctor`) before handing off. It exits
+    non-zero when a target-specific file leaked outside the workspace, the
+    report tree is missing despite existing runs, or a workspace file contains a
+    plaintext credential.
+
+## The output workspace is a hard contract
+
+Everything about a target lives in that target's workspace, and nothing else
+does. The workspace root is the directory holding its `config.json`:
+
+```
+test-output/<project>/
+  config.json
+  artifacts/   inventory, scenarios, plans, runs
+  report/      index.html + one subdirectory per tested module
+  docs/        hand-written analysis — the only legal home for it
+  scripts/     target-specific one-off scripts — likewise
+```
+
+- `artifacts.directory` and `report.projectDirectory` must resolve inside the
+  config's own directory; a path that escapes it makes the config fail to load.
+- Every `--json` result carries a `workspace` block with these absolute paths.
+  **Read it instead of guessing.** Any file you write by hand for a target — an
+  analysis note, a scenario summary, an exploration script — goes in that
+  target's `docs/` or `scripts/`. Never write it beside the tool's own source,
+  and never into the target's source tree.
+- Reference credentials by environment-variable name. Never inline a password,
+  token, or cookie into a file you write, even inside the workspace.
 
 ## Required assistant behavior
 

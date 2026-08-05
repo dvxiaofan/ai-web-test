@@ -34,7 +34,12 @@ function createSurface(page: Page, context: BrowserContext): BrowserAuthSurface 
       await page.goto(url);
     },
     fill: (selector, value) => page.fill(selector, value),
-    click: (selector) => page.click(selector),
+    click: (selector) => {
+      if (selector.startsWith('getbytext:')) {
+        return page.getByText(selector.slice('getbytext:'.length), { exact: false }).first().click();
+      }
+      return page.click(selector);
+    },
     getUrl: async () => page.url(),
     getText: async (selector) => {
       const locator = page.locator(selector).first();
@@ -46,5 +51,6 @@ function createSurface(page: Page, context: BrowserContext): BrowserAuthSurface 
       return (await locator.count()) > 0 && (await locator.isVisible());
     },
     captureStorageState: async () => (await context.storageState()) as unknown as StorageState,
+    waitForUrl: (url: string) => page.waitForURL(url),
   };
 }

@@ -36,6 +36,11 @@ export interface AgentSuccessResponse {
   operationId?: string;
   state?: AgentState;
   artifacts?: Record<string, string>;
+  /**
+   * Absolute paths of the target's workspace. Emitted on every command that
+   * loads a config so an assistant never has to guess where a file belongs.
+   */
+  workspace?: Record<string, string>;
   warnings: string[];
   nextActions: NextAction[];
   [key: string]: unknown;

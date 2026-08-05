@@ -196,9 +196,19 @@ export class ArtifactStore {
   }
 }
 
+/**
+ * True when `candidate` resolves to `root` itself or anything beneath it.
+ * The single containment rule shared by the artifact store and the config
+ * validator, so "inside the workspace" means the same thing everywhere.
+ */
+export function isInsideDirectory(root: string, candidate: string): boolean {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  if (relative === "") return true;
+  return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
 function assertInside(root: string, candidate: string): void {
-  const relative = path.relative(root, candidate);
-  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+  if (!isInsideDirectory(root, candidate)) {
     throw new Error(`Artifact path escapes the configured workspace: ${candidate}`);
   }
 }

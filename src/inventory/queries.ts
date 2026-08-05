@@ -31,7 +31,7 @@ export function queryInventory(query: InventoryQuery, inventory: Inventory, opti
   switch (query.action) {
     case "summary": {
       const scenarios = query.scenarios;
-      const summary = summarizeInventory(inventory, scenarios);
+      const summary = summarizeInventory(inventory, scenarios ? [...scenarios] : undefined);
       return {
         ...summary,
         coverage: computeCoverage(inventory, scenarios ?? []),

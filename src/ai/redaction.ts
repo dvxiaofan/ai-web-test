@@ -11,6 +11,23 @@ export function redactText(text: string): string {
   return TOKEN_PATTERNS.reduce((value, pattern) => value.replace(pattern, '[REDACTED]'), text);
 }
 
+/**
+ * Report the literal secrets `redactText` would strip. Shares TOKEN_PATTERNS so
+ * "what counts as a secret" has one definition across redaction and the
+ * workspace audit in `agent/doctor`.
+ */
+export function findSecretMatches(text: string): string[] {
+  const matches = new Set<string>();
+  for (const pattern of TOKEN_PATTERNS) {
+    // Patterns are module-level and carry /g, so reset lastIndex before reuse.
+    pattern.lastIndex = 0;
+    for (const match of text.matchAll(pattern)) {
+      if (match[0]) matches.add(match[0].trim());
+    }
+  }
+  return [...matches];
+}
+
 export function redactSecrets(value: unknown, additionalSecretKeys: string[] = []): unknown {
   const seen = new WeakSet<object>();
   const explicitKeys = new Set(additionalSecretKeys.map((key) => key.toLowerCase()));

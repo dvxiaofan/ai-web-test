@@ -40,7 +40,7 @@ export function validateProposal(
 
   const shape = validateProposalShape(proposal);
   if (!shape.valid) {
-    return { status: "rejected", errors: shape.errors, warnings, duplicateOf: undefined };
+    return { status: "rejected", errors: shape.errors, warnings };
   }
 
   const { inventory, existingScenarios = [], otherProposals = [], maxRisk } = options;
@@ -80,7 +80,6 @@ export function validateProposal(
     (scenario) =>
       scenarioSignature({
         routeId: scenario.routeIds[0],
-        pageId: undefined,
         roleIds: scenario.roleIds,
         steps: scenario.steps,
       }) === signature,
@@ -112,5 +111,5 @@ export function validateProposal(
     };
   }
 
-  return { status: errors.length === 0 ? "accepted" : "rejected", errors, warnings, duplicateOf: undefined };
+  return { status: errors.length === 0 ? "accepted" : "rejected", errors, warnings };
 }

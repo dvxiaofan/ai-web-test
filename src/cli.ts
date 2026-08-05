@@ -10,9 +10,11 @@ import {
   ArtifactStore,
   ConfigValidationError,
   ensureSelfIgnoringGitignore,
+  ensureWorkspace,
   loadConfig,
   pathExists,
   readJsonFile,
+  resolveWorkspace,
   slugifyName,
   writeJsonFile,
   type BrowserProfile,
@@ -23,7 +25,7 @@ import {
   type RunScope,
   type TestScenario,
 } from './core/index.js';
-import { deriveProjectId, generateOperationId, AgentError, type AgentState } from './agent/index.js';
+import { deriveProjectId, generateOperationId, runDoctor, AgentError, type AgentState } from './agent/index.js';
 import { authenticate, saveStorageState } from './auth/index.js';
 import { createBrowserAuthSession } from './browser/auth-surface.js';
 import { createRuntimeFirstInventory, discoverSource } from './discovery/index.js';
@@ -99,6 +101,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         break;
       case 'status':
         await commandStatus(args, output);
+        break;
+      case 'doctor':
+        await commandDoctor(args, output);
         break;
       case 'auth':
         await commandAuth(args, output);
@@ -193,6 +198,12 @@ async function commandInit(args: ReturnType<typeof parseCliArgs>, output: CliOut
     // none of it belongs in version control.
     await ensureSelfIgnoringGitignore(path.resolve(cwd, 'test-output'));
   }
+  // docs/ and scripts/ exist from the start so hand-written analysis and one-off
+  // scripts have an obvious home inside the target's workspace, instead of being
+  // dropped next to the tool's own source.
+  const workspace = resolveWorkspace(await loadConfig(configPath));
+  await ensureWorkspace(workspace);
+  output.setWorkspace(workspace);
   const relativeConfig = path.relative(cwd, configPath);
   output.setContext({ projectId: deriveProjectId({ baseUrl, rootDir: targetRoot ?? path.dirname(configPath) }) });
   output.result({
@@ -217,7 +228,7 @@ async function commandInventory(args: ReturnType<typeof parseCliArgs>, output: C
   if (sub === 'merge') {
     const file = getStringOption(args, 'file');
     if (!file) throw new Error('usage: aitest inventory merge --file <supplement.json>');
-    const config = await readConfig(args);
+    const config = await readConfig(args, output);
     output.setContext({ projectId: deriveProjectId(config.target) });
     const store = new ArtifactStore(config.artifacts.directory);
     const inventory = await store.readInventory();
@@ -251,7 +262,7 @@ async function commandInventory(args: ReturnType<typeof parseCliArgs>, output: C
 }
 
 async function commandDiscover(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
-  const config = await readConfig(args);
+  const config = await readConfig(args, output);
   output.setContext({ projectId: deriveProjectId(config.target) });
   const store = new ArtifactStore(config.artifacts.directory);
   await store.initialize();
@@ -331,7 +342,7 @@ async function commandDiscover(args: ReturnType<typeof parseCliArgs>, output: Cl
 }
 
 async function commandPlan(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
-  const config = await readConfig(args);
+  const config = await readConfig(args, output);
   output.setContext({ projectId: deriveProjectId(config.target) });
   const store = new ArtifactStore(config.artifacts.directory);
   const inventory = await store.readInventory();
@@ -395,7 +406,7 @@ async function commandPlan(args: ReturnType<typeof parseCliArgs>, output: CliOut
 }
 
 async function commandAiPlan(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
-  const config = await readConfig(args);
+  const config = await readConfig(args, output);
   output.setContext({ projectId: deriveProjectId(config.target) });
   const store = new ArtifactStore(config.artifacts.directory);
   const inventory = await store.readInventory();
@@ -436,7 +447,7 @@ async function commandAiPlan(args: ReturnType<typeof parseCliArgs>, output: CliO
 }
 
 async function commandApprove(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
-  const config = await readConfig(args);
+  const config = await readConfig(args, output);
   output.setContext({ projectId: deriveProjectId(config.target) });
   const store = new ArtifactStore(config.artifacts.directory);
   const inventory = await store.readInventory();
@@ -468,7 +479,7 @@ async function commandApprove(args: ReturnType<typeof parseCliArgs>, output: Cli
 }
 
 async function commandRun(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
-  const config = await readConfig(args);
+  const config = await readConfig(args, output);
   output.setContext({ projectId: deriveProjectId(config.target) });
   const store = new ArtifactStore(config.artifacts.directory);
   await store.initialize();
@@ -519,14 +530,69 @@ async function commandRun(args: ReturnType<typeof parseCliArgs>, output: CliOutp
   await writeHtmlReport(reportModel, reportPath);
   const markdownPath = store.runWorkspace(result.id).markdown;
   await writeMarkdownReport(reportModel, markdownPath);
+  const projectReport = await buildProjectReportAfterRun(
+    { config, inventory, scenarios, runResult: result, plan, store },
+    output,
+    // `--no-project-report` parses to projectReport=false; default is on.
+    !getBooleanOption(args, 'project-report', true),
+  );
   output.setContext({ planId: plan.id });
   const finalState: AgentState = result.status === 'passed' ? 'completed' : 'failed';
-  output.result({ status: result.status, runId: result.id, resultPath, reportPath, markdownPath, coverage: result.coverage }, finalState);
+  output.result(
+    {
+      status: result.status,
+      runId: result.id,
+      resultPath,
+      reportPath,
+      markdownPath,
+      coverage: result.coverage,
+      ...(projectReport !== undefined ? { projectReport } : {}),
+    },
+    finalState,
+  );
   if (runResultExitCode(result.status) !== 0) process.exitCode = runResultExitCode(result.status);
 }
 
+/**
+ * The by-module report tree is the human-facing deliverable, so a run always
+ * produces one instead of leaving it to a follow-up command that is easy to
+ * forget. A failure here is reported as a warning: it must never mask the run's
+ * own status or exit code.
+ */
+async function buildProjectReportAfterRun(
+  input: {
+    config: ProjectConfig;
+    inventory: Inventory;
+    scenarios: TestScenario[];
+    runResult: RunResult;
+    plan: RunPlan;
+    store: ArtifactStore;
+  },
+  output: CliOutput,
+  skip: boolean,
+): Promise<{ rootDir: string; indexHtmlPath: string; modules: number } | undefined> {
+  if (skip) return undefined;
+  try {
+    const overview = await input.store.readOverviewIfExists();
+    const result = await writeProjectReport({
+      config: input.config,
+      inventory: input.inventory,
+      scenarios: input.scenarios,
+      runResult: input.runResult,
+      plan: input.plan,
+      overview,
+    });
+    return { rootDir: result.rootDir, indexHtmlPath: result.indexHtmlPath, modules: result.modules.length };
+  } catch (error) {
+    output.warn(
+      `Run finished but the by-module report tree could not be written: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return undefined;
+  }
+}
+
 async function commandReport(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
-  const config = await readConfig(args);
+  const config = await readConfig(args, output);
   output.setContext({ projectId: deriveProjectId(config.target) });
   const store = new ArtifactStore(config.artifacts.directory);
   const runId = getStringOption(args, 'run') ?? args.positionals[0];
@@ -557,7 +623,7 @@ async function latestRunId(store: ArtifactStore): Promise<string | undefined> {
 }
 
 async function commandProjectReport(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
-  const config = await readConfig(args);
+  const config = await readConfig(args, output);
   output.setContext({ projectId: deriveProjectId(config.target) });
   const store = new ArtifactStore(config.artifacts.directory);
   await store.initialize();
@@ -588,7 +654,7 @@ async function commandProjectReport(args: ReturnType<typeof parseCliArgs>, outpu
 }
 
 async function commandAnalyze(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
-  const config = await readConfig(args);
+  const config = await readConfig(args, output);
   output.setContext({ projectId: deriveProjectId(config.target) });
   const store = new ArtifactStore(config.artifacts.directory);
   const runId = getStringOption(args, 'run') ?? args.positionals[0];
@@ -624,7 +690,7 @@ async function commandAnalyze(args: ReturnType<typeof parseCliArgs>, output: Cli
 }
 
 async function commandStatus(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
-  const config = await readConfig(args);
+  const config = await readConfig(args, output);
   output.setContext({ projectId: deriveProjectId(config.target) });
   const store = new ArtifactStore(config.artifacts.directory);
   const inventory = await store.readInventory();
@@ -632,8 +698,39 @@ async function commandStatus(args: ReturnType<typeof parseCliArgs>, output: CliO
   output.result({ inventory: summarizeInventory(inventory, scenarios), artifacts: store.layout });
 }
 
+/**
+ * Audit the target's workspace for what static enforcement cannot reach:
+ * hand-written files that landed outside it, and credentials inlined into the
+ * ones inside it. Exits non-zero on any error-severity finding so CI can gate.
+ */
+async function commandDoctor(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
+  const config = await readConfig(args, output);
+  output.setContext({ projectId: deriveProjectId(config.target) });
+  const toolRoot = getStringOption(args, 'tool-root');
+  const report = await runDoctor(config, toolRoot ? { toolRoot } : {});
+
+  if (!getBooleanOption(args, 'json')) {
+    if (report.findings.length === 0) {
+      output.info(`workspace ${report.workspace.root}: no violations`);
+    }
+    for (const finding of report.findings) {
+      const location = finding.path ? ` ${path.relative(process.cwd(), finding.path)}` : '';
+      const hint = finding.suggestion ? ` → ${finding.suggestion}` : '';
+      output.info(`${finding.severity === 'error' ? '✗' : '!'} [${finding.code}]${location} ${finding.message}${hint}`);
+    }
+  }
+
+  output.result({
+    ok: report.ok,
+    findings: report.findings,
+    errors: report.findings.filter((finding) => finding.severity === 'error').length,
+    warnings: report.findings.filter((finding) => finding.severity === 'warning').length,
+  });
+  if (!report.ok) process.exitCode = 1;
+}
+
 async function commandAuth(args: ReturnType<typeof parseCliArgs>, output: CliOutput): Promise<void> {
-  const config = await readConfig(args);
+  const config = await readConfig(args, output);
   const roleId = getStringOption(args, 'role');
   const roles = config.auth.roles;
   const role =
@@ -685,8 +782,15 @@ export function resolveConfigPath(args: ReturnType<typeof parseCliArgs>): string
   return path.resolve(process.cwd(), DEFAULT_CONFIG_NAME);
 }
 
-async function readConfig(args: ReturnType<typeof parseCliArgs>): Promise<ProjectConfig> {
-  return loadConfig(resolveConfigPath(args));
+/**
+ * Load the target config and publish its workspace paths on the output sink, so
+ * every JSON result tells the caller exactly which directories belong to this
+ * target. One place to change beats threading it through each command.
+ */
+async function readConfig(args: ReturnType<typeof parseCliArgs>, output?: CliOutput): Promise<ProjectConfig> {
+  const config = await loadConfig(resolveConfigPath(args));
+  output?.setWorkspace(resolveWorkspace(config));
+  return config;
 }
 
 async function readScenarioCatalog(store: ArtifactStore, inventory: Inventory, allowSecretPersistence = false): Promise<TestScenario[]> {
@@ -933,7 +1037,7 @@ async function commandHealing(
   args: ReturnType<typeof parseCliArgs>,
   output: CliOutput,
 ): Promise<void> {
-  const config = await readConfig(args);
+  const config = await readConfig(args, output);
   const store = new ArtifactStore(config.artifacts.directory);
   const runId = getStringOption(args, 'run');
   const beforePath = getStringOption(args, 'before');
@@ -976,7 +1080,7 @@ async function commandTrends(
   args: ReturnType<typeof parseCliArgs>,
   output: CliOutput,
 ): Promise<void> {
-  const config = await readConfig(args);
+  const config = await readConfig(args, output);
   const store = new ArtifactStore(config.artifacts.directory);
   const flakyWindow = toOptionalNumber(getStringOption(args, 'flaky-window'));
   const trendOptions: { flakyWindow?: number } = {};
@@ -989,7 +1093,7 @@ async function commandRetention(
   args: ReturnType<typeof parseCliArgs>,
   output: CliOutput,
 ): Promise<void> {
-  const config = await readConfig(args);
+  const config = await readConfig(args, output);
   const store = new ArtifactStore(config.artifacts.directory);
   const policy: RetentionPolicy = {
     maxRuns: toOptionalNumber(getStringOption(args, 'max-runs')),
@@ -1012,13 +1116,15 @@ Commands:
   ai-plan                             Ask the configured AI provider for advisory business scenarios
   analyze --run <id>                 Ask the configured AI provider to triage failed scenarios
   approve --plan <id>                 Confirm a proposed plan (interactive by default)
-  run --plan <id>                     Execute an approved plan in Playwright
+  run --plan <id>                     Execute an approved plan in Playwright (also builds the report tree)
   run --step-screenshots              Capture a screenshot after every step (needs allowSecretPersistence)
+  run --no-project-report             Skip the by-module report tree (it is built by default)
   report --run <id>                   Regenerate an HTML report
-  report --by-module [--run <id>]     Build the test-<project> tree: global module analysis + per-module HTML reports
+  report --by-module [--run <id>]     Rebuild the report tree: global module analysis + per-module HTML reports
   inventory merge --file <json>       Merge an operator/AI inventory supplement (modules/routes/apis)
   inventory diff --base <json> --compare <json>   Compare two inventories (recall + blind spots)
   status                              Show inventory and coverage summary
+  doctor                              Audit the workspace: leaked files, missing report tree, inline secrets
   auth [--role <id>]                  Authenticate a configured role and save storage state
   mcp                                 Start the MCP server (stdio) for AI clients
   healing --run <id>                  Triage failures of a run (deterministic classification)

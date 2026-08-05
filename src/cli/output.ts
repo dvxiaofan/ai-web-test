@@ -1,4 +1,5 @@
 import { buildErrorEnvelope, buildSuccessEnvelope, deriveNextActions, normalizeAgentError, type AgentState } from "../agent/index.js";
+import type { Workspace } from "../core/workspace.js";
 
 export interface CliOutputOptions {
   json: boolean;
@@ -27,6 +28,7 @@ export class CliOutput {
   #projectId: string | undefined;
   #planId: string | undefined;
   #operationId: string | undefined;
+  #workspace: Workspace | undefined;
 
   constructor(options: CliOutputOptions) {
     this.#json = options.json;
@@ -39,6 +41,15 @@ export class CliOutput {
   setContext(context: CliOutputContext): void {
     if (context.projectId) this.#projectId = context.projectId;
     if (context.planId) this.#planId = context.planId;
+  }
+
+  /**
+   * Record the target's workspace so every JSON result carries the absolute
+   * paths an assistant is allowed to write to. Set once, right after the config
+   * loads, instead of being threaded through each command.
+   */
+  setWorkspace(workspace: Workspace): void {
+    this.#workspace = workspace;
   }
 
   info(message: string): void {
@@ -68,6 +79,7 @@ export class CliOutput {
       if (this.#projectId) envelope.projectId = this.#projectId;
       if (this.#planId) envelope.planId = this.#planId;
       if (this.#operationId) envelope.operationId = this.#operationId;
+      if (this.#workspace) envelope.workspace = workspacePaths(this.#workspace);
       process.stdout.write(`${JSON.stringify(envelope)}\n`);
       return;
     }
@@ -84,4 +96,16 @@ export class CliOutput {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`error: ${message}\n`);
   }
+}
+
+/** Flatten a Workspace into the string map the response envelope carries. */
+function workspacePaths(workspace: Workspace): Record<string, string> {
+  return {
+    root: workspace.root,
+    ...(workspace.configPath !== undefined ? { configPath: workspace.configPath } : {}),
+    artifactsDir: workspace.artifactsDir,
+    reportDir: workspace.reportDir,
+    docsDir: workspace.docsDir,
+    scriptsDir: workspace.scriptsDir,
+  };
 }

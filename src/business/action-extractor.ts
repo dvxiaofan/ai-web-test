@@ -78,7 +78,6 @@ export function extractBusinessActions(inventory: Inventory): BusinessActionNode
       name: `${verb} ${entityName}`,
       moduleId,
       verbs: [verb],
-      entityId: undefined,
       routeIds,
       pageIds,
       statesBefore: [],

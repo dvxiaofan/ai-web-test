@@ -31,7 +31,7 @@
     "artifacts": {
       "type": "object",
       "properties": {
-        "directory": { "type": "string" },
+        "directory": { "type": "string", "description": "Artifact workspace. Relative paths resolve against the config directory, and the resolved path must stay inside it — a path that escapes the workspace is rejected." },
         "retainRuns": { "type": "integer", "minimum": 1 }
       },
       "additionalProperties": false
@@ -132,7 +132,7 @@
     "report": {
       "type": "object",
       "properties": {
-        "projectDirectory": { "type": "string", "description": "Override the top-level 'test-<project>' report directory. Relative paths resolve against the config directory." }
+        "projectDirectory": { "type": "string", "description": "Rename the report tree directory (default 'report' beside the artifact workspace). Relative paths resolve against the config directory, and the resolved path must stay inside it." }
       },
       "additionalProperties": false
     }

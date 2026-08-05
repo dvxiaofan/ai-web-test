@@ -1,4 +1,4 @@
-import type { Inventory } from "../core/types.js";
+import type { Inventory, RoleNode } from "../core/types.js";
 import type {
   BusinessInventory,
   BusinessGap,
@@ -49,8 +49,8 @@ export function computeBusinessGaps(inventory: Inventory, business: BusinessInve
 
   const grantedRoles = new Set(permissions.flatMap((p) => p.roleIds));
   const roleIds = inventory.nodes
-    .filter((n) => n.kind === "role")
-    .map((n) => ({ id: n.id, name: "name" in n ? n.name : n.id }));
+    .filter((n): n is RoleNode => n.kind === "role")
+    .map((n) => ({ id: n.id, name: n.name }));
   for (const role of roleIds) {
     if (!grantedRoles.has(role.id)) {
       gaps.push({

@@ -60,10 +60,17 @@ npm run aitest -- run --project 项目名 --plan <计划ID>
 
 `init` 会为每个被测项目在工具目录下建立独立工作区
 `test-output/<项目名>/`，包含 `config.json`（该项目的配置）、`artifacts/`
-（清单、计划、运行记录）和 `report/`（人类可读报告）。`--project <项目名>`
-是 `--config test-output/<项目名>/config.json` 的简写。`test-output/` 整体
-被 git 忽略，工具还会在每个产物目录内自动写入自忽略的 `.gitignore`，
-确保被测项目的数据（截图、内网地址、登录态）不会进入版本库。
+（清单、计划、运行记录）、`report/`（人类可读报告树）、`docs/`（手写分析文档）
+和 `scripts/`（该项目专用的一次性脚本）。`--project <项目名>`
+是 `--config test-output/<项目名>/config.json` 的简写。
+
+这个布局是**强制**的，不是约定：`artifacts.directory` 与
+`report.projectDirectory` 解析后必须落在配置文件所在目录内，越界的路径会让配置
+直接加载失败。所有 `--json` 输出都带 `workspace` 字段列出这些绝对路径——手写
+文件请照着写，不要自己猜位置。`aitest doctor` 会检查漏到工作区外的目标文件、
+缺失的报告树，以及工作区文件里的明文口令。`test-output/` 整体被 git 忽略，
+工具还会在每个产物目录内自动写入自忽略的 `.gitignore`，确保被测项目的数据
+（截图、内网地址、登录态）不会进入版本库。
 
 如果执行 `plan` 时没有传入范围，工具会询问操作者选择：
 
@@ -203,13 +210,13 @@ npm run aitest -- retention --project 项目名 --max-runs 20 --dry-run
 
 ## 项目报告树（交付给人看）
 
-需要一份可直接交付的报告时，用 `aitest report --by-module`（或 MCP 工具
-`awt_project_report`）生成一个自包含的报告目录。`init` 生成的配置对应
-`test-output/<项目名>/report/`；没有配 `report.projectDirectory` 时，默认
-落在产物工作区旁边的 `test-<项目名>` 目录：
+`aitest run` 每次跑完都会自动生成这棵报告树（用 `--no-project-report` 可跳过）；
+需要单独重建时用 `aitest report --by-module`（或 MCP 工具
+`awt_project_report`）。它固定落在工作区内的 `test-output/<项目名>/report/`，
+`report.projectDirectory` 可以改名，但改不出工作区：
 
 ```text
-test-<项目名>/
+test-output/<项目名>/report/
   index.html              # 第一份文档：全局业务模块分析
   <模块名>/                # 每个被测模块一个子目录
     module.html           # 测试业务、每个步骤（含截图）、结论、发现的问题
@@ -287,8 +294,16 @@ test-output/<项目名>/
 │   ├── auth/                  # 各角色保存的登录态
 │   ├── cache/
 │   └── visual-baselines/
-└── report/                    # 人类可读报告树（index.html + 各模块子目录）
+├── report/                    # 人类可读报告树（index.html + 各模块子目录）
+├── docs/                      # AI 手写的分析文档，只能放这里
+└── scripts/                   # 该项目专用的一次性脚本，只能放这里
 ```
+
+**这个目录是硬约束**：跟被测项目有关的一切都在工作区内，工作区外不留任何东西。
+每次 `--json` 输出都带 `workspace` 字段列出上述绝对路径，照着写即可，不要另找
+位置。手写的分析文档进 `docs/`，一次性探索脚本进 `scripts/`，绝不写进工具仓库
+或被测项目源码树。口令一律按环境变量名引用，不要内联进任何文件。交付前跑一次
+`aitest doctor`：有越界文件、缺报告树或明文口令时它会以非零码退出。
 
 即使不配置任何模型 API，AI 助手也能正常使用本工具：调用 CLI、读
 `inventory.json`、读待审批计划、读 `result.json` 和 HTML 报告就够了。需要

@@ -10,20 +10,27 @@ for completion and basic validation.
 ## Workspace layout and config location
 
 `aitest init` creates one workspace per target: `test-output/<project>/` with
-`config.json`, `artifacts/`, and `report/` inside. Every CLI command accepts
-`--project <name>` as shorthand for `--config test-output/<name>/config.json`.
+`config.json`, `artifacts/`, `report/`, `docs/`, and `scripts/` inside. Every
+CLI command accepts `--project <name>` as shorthand for
+`--config test-output/<name>/config.json`.
 
 Defaults when fields are omitted:
 
 - `artifacts.directory` → `test-output/<project-slug>/artifacts`, resolved
   relative to the config file (never inside the target source tree);
-- `report.projectDirectory` → a `test-<project-slug>` directory beside the
-  artifact workspace.
+- `report.projectDirectory` → a `report` directory beside the artifact
+  workspace.
+
+**Both paths must resolve inside the directory holding the config file.** A path
+that escapes it is rejected with a `workspace` validation issue and the config
+fails to load, so a target's outputs can never be written elsewhere. `docs/` and
+`scripts/` are where hand-written analysis and target-specific one-off scripts
+belong; `aitest doctor` reports files that ended up outside the workspace.
 
 The tool writes a self-ignoring `.gitignore` into `test-output/` and into every
-artifacts/report directory it creates, so generated outputs (screenshots,
-traces, storage states, internal URLs) stay out of version control regardless
-of where the directories are placed.
+directory it creates, so generated outputs (screenshots, traces, storage states,
+internal URLs) stay out of version control regardless of where the directories
+are placed.
 
 ## Minimal configuration
 

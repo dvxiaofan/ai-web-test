@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { isInsideDirectory } from "./artifacts.js";
 import { contentDigest, slugifyName, stableId } from "./ids.js";
 import { readJsonFile } from "./json.js";
 import { createDefaultPolicy, mergeTestPolicy } from "./policy.js";
@@ -245,7 +246,8 @@ export interface ConfigValidationIssue {
     | "format"
     | "security"
     | "duplicate"
-    | "unsupported";
+    | "unsupported"
+    | "workspace";
   message: string;
 }
 
@@ -355,7 +357,8 @@ export function collectConfigIssues(input: unknown, options: ConfigValidationOpt
   validateAuthRoles(input.auth, issues);
   validatePolicy(input.policy, issues);
   validateAi(input.ai, issues);
-  validateArtifacts(input.artifacts, issues);
+  validateArtifacts(input.artifacts, configDir, issues);
+  validateReport(input.report, configDir, issues);
   validatePresets(input.presets, issues);
 
   if (input.project !== undefined && !isRecord(input.project)) {
@@ -561,14 +564,52 @@ function validateAi(value: unknown, issues: ConfigValidationIssue[]): void {
   }
 }
 
-function validateArtifacts(value: unknown, issues: ConfigValidationIssue[]): void {
+/**
+ * Every output a target produces must stay inside that target's own workspace —
+ * the directory holding its config.json. This is the containment rule the
+ * ArtifactStore already enforces at write time, lifted to config load so a
+ * misdirected path fails before a single file is written.
+ */
+function validateWorkspacePath(
+  value: unknown,
+  field: string,
+  configDir: string,
+  issues: ConfigValidationIssue[],
+): void {
+  if (typeof value !== "string" || value.trim().length === 0) return;
+  const resolved = path.resolve(configDir, value);
+  if (!isInsideDirectory(configDir, resolved)) {
+    issues.push({
+      path: field,
+      code: "workspace",
+      message: `Output paths must stay inside the project workspace (${configDir}); ${field} resolves to ${resolved}.`,
+    });
+  }
+}
+
+function validateArtifacts(value: unknown, configDir: string, issues: ConfigValidationIssue[]): void {
   if (value === undefined) return;
   if (!isRecord(value)) {
     issues.push({ path: "artifacts", code: "type", message: "artifacts must be an object." });
     return;
   }
-  if (value.directory !== undefined) validatePath(value.directory, "artifacts.directory", issues);
+  if (value.directory !== undefined) {
+    validatePath(value.directory, "artifacts.directory", issues);
+    validateWorkspacePath(value.directory, "artifacts.directory", configDir, issues);
+  }
   validatePositiveInteger(value.retainRuns, "artifacts.retainRuns", issues, 1, 10_000);
+}
+
+function validateReport(value: unknown, configDir: string, issues: ConfigValidationIssue[]): void {
+  if (value === undefined) return;
+  if (!isRecord(value)) {
+    issues.push({ path: "report", code: "type", message: "report must be an object." });
+    return;
+  }
+  if (value.projectDirectory !== undefined) {
+    validatePath(value.projectDirectory, "report.projectDirectory", issues);
+    validateWorkspacePath(value.projectDirectory, "report.projectDirectory", configDir, issues);
+  }
 }
 
 function validatePresets(value: unknown, issues: ConfigValidationIssue[]): void {
@@ -655,6 +696,7 @@ function buildAuthRoles(value: unknown, rootDir: string, baseUrl: string | undef
       name,
       strategy: isSupportedStrategy(String(role.strategy)) ? String(role.strategy) as AuthRoleConfig["strategy"] : "auto",
       ...(credentials ? { credentials } : {}),
+      ...(isRecord(role.metadata) ? { metadata: role.metadata as JsonObject } : {}),
       target: {
         baseUrl: typeof target.baseUrl === "string" ? target.baseUrl : baseUrl ?? "",
         ...(typeof target.loginUrl === "string" ? { loginUrl: target.loginUrl } : {}),

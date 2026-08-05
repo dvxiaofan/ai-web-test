@@ -73,12 +73,20 @@ test-output/                  # gitignored as a whole; also self-ignored
     config.json               # the aitest config for this target
     artifacts/                # inventory, plans, runs, cache, auth states
     report/                   # human-facing report tree (index.html + modules)
+    docs/                     # hand-written analysis for this target
+    scripts/                  # target-specific one-off scripts
 ```
 
 `--project <name>` is shorthand for `--config test-output/<name>/config.json`.
-The tool also drops a self-ignoring `.gitignore` into every artifacts and
-report directory it creates, so outputs stay out of version control even when
-the workspace is moved or a custom directory is configured.
+
+The layout is enforced rather than assumed: `artifacts.directory` and
+`report.projectDirectory` must resolve inside the directory holding the config,
+and a path that escapes it makes the config fail to load. Every `--json` result
+carries a `workspace` block with the absolute paths, and `aitest doctor` reports
+target files that ended up outside the workspace, a missing report tree, or a
+plaintext credential in a workspace file. The tool also drops a self-ignoring
+`.gitignore` into every directory it creates, so outputs stay out of version
+control even when the workspace is moved.
 
 The sample app can be used without a framework or external backend:
 
