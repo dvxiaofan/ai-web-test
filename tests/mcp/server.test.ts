@@ -7,6 +7,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { McpService } from '../../src/mcp/index.js';
 import { createMcpServer } from '../../src/mcp/index.js';
+import { MCP_TOOLS } from '../../src/mcp/protocol.js';
 
 /**
  * Minimal in-process MCP client over memory streams. The server's stdio
@@ -100,7 +101,7 @@ describe('MCP server over stdio (in-memory)', () => {
   it('lists all awt_* tools', async () => {
     const response = await client.request('tools/list', {});
     const names = response.result.tools.map((tool: any) => tool.name);
-    expect(names).toHaveLength(14);
+    expect(names).toHaveLength(Object.keys(MCP_TOOLS).length);
     expect(names.every((name: string) => name.startsWith('awt_'))).toBe(true);
     expect(names).toContain('awt_healing_classify');
     expect(names).toContain('awt_healing_review');

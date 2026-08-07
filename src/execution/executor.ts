@@ -78,6 +78,47 @@ interface RuntimeExecutionEvidence {
   visitedUrls: string[];
 }
 
+/**
+ * Resolve the ordered list of run roles for a plan.
+ *
+ * When any selected scenario is anonymous (`roleIds` empty) the synthetic
+ * `anonymous` role is always prepended so those scenarios always have an
+ * executor, independent of the declared roles. Declared roles are appended
+ * unchanged. This is the fix for the role deadlock: anonymous scenarios must
+ * never be bound to an authenticated role.
+ */
+export function resolveRunRoles(selectedScenarios: TestScenario[], declaredRoles: string[]): string[] {
+  const needsAnonymous = selectedScenarios.some((scenario) => scenario.roleIds.length === 0);
+  return [...(needsAnonymous ? ['anonymous'] : []), ...declaredRoles];
+}
+
+/** Select the scenarios a given run role is responsible for executing. */
+export function selectScenariosForRole(role: string, scenarios: TestScenario[]): TestScenario[] {
+  return scenarios.filter((scenario) =>
+    role === 'anonymous' ? scenario.roleIds.length === 0 : scenario.roleIds.includes(role),
+  );
+}
+
+/**
+ * Decide whether an authenticated role can run based on available storage
+ * state. Anonymous always runs without storage; any role missing storage
+ * state is blocked with an actionable error.
+ */
+export function classifyRoleStorageState(
+  role: string,
+  storageStateByRole: Record<string, string> | undefined,
+): { blocked: boolean; storageState?: string; error?: string } {
+  if (role === 'anonymous') return { blocked: false, storageState: undefined };
+  const storageState = storageStateByRole?.[role];
+  if (!storageState) {
+    return {
+      blocked: true,
+      error: `Role ${role} has no Playwright storage state. Generate an isolated test-account state before running authenticated scenarios.`,
+    };
+  }
+  return { blocked: false, storageState };
+}
+
 export async function executePlan(plan: RunPlan, options: ExecutePlanOptions): Promise<RunResult> {
   assertApprovedPlan(plan, options.scenarios);
   const startedAt = new Date();
@@ -88,7 +129,7 @@ export async function executePlan(plan: RunPlan, options: ExecutePlanOptions): P
 
   const selectedScenarios = selectPlanScenarios(plan, options.scenarios);
   const profiles = plan.browserProfiles;
-  const roles = plan.roles.length > 0 ? plan.roles : ['anonymous'];
+  const roles = resolveRunRoles(selectedScenarios, plan.roles);
   const scenarioResults: ScenarioResult[] = [];
   let infrastructureError: Error | undefined;
   let playwright: typeof import('playwright');
@@ -107,9 +148,7 @@ export async function executePlan(plan: RunPlan, options: ExecutePlanOptions): P
       try {
         browser = await browserType.launch({ headless: profile.headless });
         for (const role of roles) {
-          const roleScenarios = selectedScenarios.filter(
-            (scenario) => scenario.roleIds.length === 0 || scenario.roleIds.includes(role),
-          );
+          const roleScenarios = selectScenariosForRole(role, selectedScenarios);
           for (const scenario of roleScenarios) {
             options.onProgress?.({ type: 'scenario-started', scenarioId: scenario.id, role, profileId: profile.id });
             const result = await executeScenario(browser, plan, scenario, role, profile, runDir, options);
@@ -177,15 +216,11 @@ async function executeScenario(
   const startedAt = new Date();
   const scenarioDir = path.join(runDir, sanitizeFilename(`${scenario.id}-${role}-${profile.id}`));
   await mkdir(scenarioDir, { recursive: true });
-  const storageState = role === 'anonymous' ? undefined : options.storageStateByRole?.[role];
-  if (role !== 'anonymous' && !storageState) {
-    return blockedScenarioResult(
-      scenario,
-      profile.id,
-      role,
-      new Error(`Role ${role} has no Playwright storage state. Generate an isolated test-account state before running authenticated scenarios.`),
-    );
+  const state = classifyRoleStorageState(role, options.storageStateByRole);
+  if (state.blocked) {
+    return blockedScenarioResult(scenario, profile.id, role, new Error(state.error));
   }
+  const storageState = state.storageState;
   const context = await createContext(browser, profile, storageState, options.ignoreHTTPSErrors ?? false);
   const activeStepRisk: { risk: ActionRisk } = { risk: scenario.risk };
   let blockedRequestCount = 0;
@@ -674,7 +709,7 @@ function requestPolicyFromPlan(
   };
 }
 
-function minimumRisk(...risks: Array<ActionRisk | undefined>): ActionRisk {
+export function minimumRisk(...risks: Array<ActionRisk | undefined>): ActionRisk {
   const available = risks.filter((risk): risk is ActionRisk => risk !== undefined);
   return available.reduce((minimum, risk) => (riskRank(risk) < riskRank(minimum) ? risk : minimum), 'destructive' as ActionRisk);
 }
