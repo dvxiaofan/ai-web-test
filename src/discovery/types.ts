@@ -7,7 +7,7 @@ import type {
   SourceLocation,
 } from "../core/types.js";
 
-export type FrameworkName = "next" | "nuxt" | "react" | "vue" | "unknown";
+export type FrameworkName = "next" | "nuxt" | "react" | "vue" | "astro" | "unknown";
 export type PackageManagerName = "pnpm" | "yarn" | "npm" | "bun" | "unknown";
 
 export type SourceFileClassification =

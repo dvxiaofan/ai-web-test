@@ -15,6 +15,7 @@ import {
   unwrapExpression,
 } from "./ast.js";
 import { inferRouteModule } from "./classify.js";
+import { astroFileRoutePath } from "./astro-adapter.js";
 import type {
   DiscoveredRoute,
   FrameworkName,
@@ -193,6 +194,10 @@ export function fileRoutePath(relativePath: string, framework: FrameworkName): s
   if (framework === "nuxt") {
     const pagesMatch = new RegExp(`^(?:src/)?pages/(.+)\\.${extension}$`, "i").exec(normalized);
     if (pagesMatch !== null) return routeFromSegments((pagesMatch[1] ?? "").split("/"), "nuxt");
+  }
+
+  if (framework === "astro") {
+    return astroFileRoutePath(relativePath);
   }
 
   return undefined;

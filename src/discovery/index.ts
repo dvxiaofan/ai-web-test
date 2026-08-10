@@ -6,3 +6,4 @@ export * from "./classify.js";
 export * from "./routes.js";
 export * from "./apis.js";
 export * from "./inventory.js";
+export * from "./astro-adapter.js";

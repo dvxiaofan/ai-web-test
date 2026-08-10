@@ -29,6 +29,7 @@ export async function detectFramework(rootDir: string): Promise<FrameworkDetecti
     { framework: "nuxt", packageName: "nuxt", configNames: ["nuxt.config.js", "nuxt.config.mjs", "nuxt.config.ts"], priority: 4 },
     { framework: "vue", packageName: "vue", configNames: ["vue.config.js", "vite.config.js", "vite.config.ts"], priority: 2 },
     { framework: "react", packageName: "react", configNames: ["vite.config.js", "vite.config.ts"], priority: 1 },
+    { framework: "astro", packageName: "astro", configNames: ["astro.config.js", "astro.config.mjs", "astro.config.ts"], priority: 3 },
   ];
 
   const matches: Array<{
