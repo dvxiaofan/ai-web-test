@@ -14,7 +14,7 @@ jobs:
       # E2E fixture exercises AI scenario planning, so the provider key must be present.
       CODEBUDDY_API_KEY: ${{ secrets.CODEBUDDY_API_KEY }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           # Pin Node via .nvmrc (committed in Batch 0.1) for reproducible installs.
