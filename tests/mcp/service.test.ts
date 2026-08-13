@@ -85,6 +85,36 @@ describe('McpService (no browser required)', () => {
     expect(result.plan.scenarioIds.length).toBeGreaterThanOrEqual(0);
   });
 
+  describe('approve is gated even though the caller is an assistant', () => {
+    it('refuses without explicit confirmation', async () => {
+      const { plan } = await service.plan({ scope: 'smoke' });
+      await expect(service.approve({ planId: plan.id, by: 'operator' })).rejects.toMatchObject({
+        code: 'APPROVAL_REQUIRED',
+      });
+    });
+
+    it('refuses confirm=true with no approver identity', async () => {
+      const { plan } = await service.plan({ scope: 'smoke' });
+      await expect(service.approve({ planId: plan.id, confirm: true, by: '  ' })).rejects.toMatchObject({
+        code: 'APPROVAL_REQUIRED',
+      });
+    });
+
+    it('records the named operator when both are supplied', async () => {
+      const { plan } = await service.plan({ scope: 'smoke' });
+      const approved = await service.approve({ planId: plan.id, confirm: true, by: 'release-manager' });
+      expect(approved.plan.status).toBe('approved');
+      expect(approved.plan.approval?.approvedBy).toBe('release-manager');
+    });
+  });
+
+  it('run refuses an unapproved plan as a policy decision, not a missing file', async () => {
+    const { plan } = await service.plan({ scope: 'smoke' });
+    await expect(service.run({ planId: plan.id })).rejects.toMatchObject({ code: 'PLAN_NOT_APPROVED' });
+    // The refusal must not read as "create this file to proceed".
+    await expect(service.run({ planId: plan.id })).rejects.toThrow(/approve/i);
+  });
+
   it('scenariosGenerate writes a scenario catalog and reports a count', async () => {
     const result = await service.scenariosGenerate();
     expect(result.count).toBeGreaterThan(0);

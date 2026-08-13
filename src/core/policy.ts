@@ -58,8 +58,17 @@ export class PolicyViolationError extends Error {
   }
 }
 
+/**
+ * Seed the allowlist from the target's own origin.
+ *
+ * The entry keeps the port (`localhost:4178`, not `localhost`), because a
+ * hostname-only allowlist approves every service on the machine — on a
+ * developer box or a shared CI runner, `localhost` covers a dozen unrelated
+ * apps. A pattern written without a port in a config still matches any port, so
+ * hand-written allowlists keep their existing meaning.
+ */
 export function createDefaultPolicy(baseUrl?: string): TestPolicy {
-  const allowedHosts = baseUrl === undefined ? [] : [new URL(baseUrl).hostname];
+  const allowedHosts = baseUrl === undefined ? [] : [new URL(baseUrl).host];
   return clonePolicy(DEFAULT_TEST_POLICY, { allowedHosts });
 }
 
@@ -136,7 +145,7 @@ function evaluateUrl(policy: TestPolicy, rawUrl: string, baseUrl?: string): Poli
     return denied("production-host-blocked", `Host ${hostname} looks production-like and is not explicitly approved.`);
   }
 
-  if (matchesHost(hostname, url.origin, policy.blockedHosts, base)) {
+  if (matchesHost(url, policy.blockedHosts, base)) {
     return denied("host-blocked", `Host ${hostname} is blocked by policy.`);
   }
 
@@ -145,8 +154,8 @@ function evaluateUrl(policy: TestPolicy, rawUrl: string, baseUrl?: string): Poli
     return denied("external-origin-blocked", `External origin ${url.origin} is blocked by policy.`);
   }
 
-  if (policy.allowedHosts.length > 0 && !matchesHost(hostname, url.origin, policy.allowedHosts, base)) {
-    return denied("host-not-allowed", `Host ${hostname} is not in the approved host allowlist.`);
+  if (policy.allowedHosts.length > 0 && !matchesHost(url, policy.allowedHosts, base)) {
+    return denied("host-not-allowed", `Host ${url.host} is not in the approved host allowlist.`);
   }
 
   return { allowed: true, code: "allowed", reason: "URL is within the approved policy." };
@@ -181,14 +190,28 @@ function denied(code: Exclude<PolicyDecision["code"], "allowed">, reason: string
   return { allowed: false, code, reason };
 }
 
-function matchesHost(hostname: string, origin: string, patterns: readonly string[], base?: URL): boolean {
+/**
+ * Match a URL against a host pattern list.
+ *
+ * A pattern may be `self`, a full origin (`https://app.test:8443`), a
+ * host:port (`localhost:4178`), or a bare hostname (`localhost`). A bare
+ * hostname intentionally matches any port so existing allowlists keep working;
+ * add the port to a pattern to pin it.
+ */
+function matchesHost(url: URL, patterns: readonly string[], base?: URL): boolean {
+  const hostname = url.hostname.toLowerCase();
+  const host = url.host.toLowerCase();
+  const origin = url.origin.toLowerCase();
   return patterns.some((pattern) => {
     const normalized = pattern.trim().toLowerCase();
     if (normalized === "self") {
-      return base !== undefined && origin === base.origin;
+      return base !== undefined && url.origin === base.origin;
     }
     if (normalized.includes("://")) {
-      return wildcardMatches(origin.toLowerCase(), normalized);
+      return wildcardMatches(origin, normalized);
+    }
+    if (normalized.includes(":")) {
+      return wildcardMatches(host, normalized);
     }
     return wildcardMatches(hostname, normalized);
   });

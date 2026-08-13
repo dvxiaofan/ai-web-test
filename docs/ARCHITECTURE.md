@@ -106,9 +106,11 @@ test-output/
     └── report/               # human-facing report tree (index.html + modules)
 ```
 
-Configs may still point `artifacts.directory` and `report.projectDirectory`
-anywhere; the self-ignoring `.gitignore` follows the directories, not the
-default names.
+`artifacts.directory` and `report.projectDirectory` **must resolve inside the
+directory holding the config**; a path that escapes it — literally, or through a
+symbolic link — makes the config fail to load, so no command can write outside
+the workspace. The self-ignoring `.gitignore` follows the directories, not the
+default names, so renaming them within the workspace is fine.
 
 ## 4. Execution scopes
 

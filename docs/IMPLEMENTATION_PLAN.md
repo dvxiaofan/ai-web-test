@@ -1,12 +1,13 @@
 # Implementation plan
 
-Implementation status as of 2026-07-23: milestones 1–3 form a usable alpha for
-controlled discovery and declarative smoke tests. Milestones 4–5 have working
-building blocks, but AI-to-executable-scenario import, authentication setup,
-test-data lifecycle, reproducible packaging, and release-grade browser CI still
-require work. Browser end-to-end execution is covered by an opt-in fixture test
-(`AI_WEB_TEST_E2E=1`); environments that forbid local listeners should run the
-unit/integration suite and execute the fixture in CI.
+Implementation status as of 2026-08-12: milestones 1–4 are in place and
+milestone 5 is close — the package lock is committed, the browser fixture runs
+in CI, and business/healing/history/agent layers ship with test coverage. What
+remains for a release is AI-proposal review/import ergonomics, authentication
+and test-data fixtures for real targets, and documented cleanup/rollback
+contracts for mutating scenarios. Browser end-to-end execution is covered by an
+opt-in fixture test (`AI_WEB_TEST_E2E=1`); environments that forbid local
+listeners should run the unit/integration suite and execute the fixture in CI.
 
 ## Milestone 1: foundation ✅
 
@@ -32,13 +33,14 @@ unit/integration suite and execute the fixture in CI.
 - Full/module/route/scenario/tag/role selectors.
 - Interactive approval gate and immutable approved plans.
 
-## Milestone 4: AI assistance 🧪
+## Milestone 4: AI assistance ✅
 
 - Provider-neutral schema-constrained adapter.
 - Advisory scenario proposal from inventory and bounded, opt-in source excerpts.
 - Semantic screenshot review integration point.
 - Failure classification and actionable triage.
 - Machine-readable agent protocol and example assistant instructions.
+- MCP surface with the same approval gate as the CLI.
 
 ## Milestone 5: quality and distribution 🚧
 
@@ -48,9 +50,9 @@ unit/integration suite and execute the fixture in CI.
 - CI templates, Docker guidance, and package publishing metadata.
 - Full quick-start, configuration, adapter, agent, and troubleshooting docs.
 
-Remaining release gates include a committed package lock, mandatory browser E2E
-in CI, authentication/data fixtures, AI proposal review/import, and documented
-cleanup/rollback contracts for mutating scenarios.
+Remaining release gates: AI proposal review/import, authentication and data
+fixtures for real targets, and documented cleanup/rollback contracts for
+mutating scenarios.
 
 ## Acceptance gates
 

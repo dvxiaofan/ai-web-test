@@ -1,0 +1,25 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      # Routine patch/minor bumps arrive as one PR so the queue stays readable;
+      # majors come separately because they need a real look.
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # Playwright's browser binaries are installed by CI, and a version bump
+      # that outpaces the pinned browsers breaks execution rather than fixing it.
+      - dependency-name: "playwright"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

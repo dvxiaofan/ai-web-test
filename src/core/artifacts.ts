@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { readJsonFile, pathExists, writeJsonFile, type WriteJsonOptions } from "./json.js";
@@ -200,11 +200,55 @@ export class ArtifactStore {
  * True when `candidate` resolves to `root` itself or anything beneath it.
  * The single containment rule shared by the artifact store and the config
  * validator, so "inside the workspace" means the same thing everywhere.
+ *
+ * This is a *lexical* check — it cannot see through symbolic links. Callers
+ * that can afford I/O should use `isInsideDirectoryReal`, which resolves links
+ * first; this one stays synchronous for the hot paths that run on every write.
  */
 export function isInsideDirectory(root: string, candidate: string): boolean {
   const relative = path.relative(path.resolve(root), path.resolve(candidate));
   if (relative === "") return true;
   return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
+/**
+ * Containment that survives symbolic links.
+ *
+ * A lexical check accepts `<workspace>/artifacts` even when that name is a link
+ * to somewhere else entirely, so every artifact would land outside the
+ * workspace while all three guards reported it contained. Resolving both sides
+ * to their real locations first closes that path. Neither side needs to exist:
+ * a path that has not been created yet resolves through its nearest existing
+ * ancestor, which is exactly the case on a first run.
+ */
+export async function isInsideDirectoryReal(root: string, candidate: string): Promise<boolean> {
+  const [realRoot, realCandidate] = await Promise.all([
+    resolveThroughExistingAncestor(root),
+    resolveThroughExistingAncestor(candidate),
+  ]);
+  return isInsideDirectory(realRoot, realCandidate);
+}
+
+/**
+ * Resolve symlinks as far as the path exists, then re-append the part that does
+ * not exist yet. `realpath` on a missing path throws, but the directories that
+ * *do* exist are precisely where a link can redirect us.
+ */
+async function resolveThroughExistingAncestor(target: string): Promise<string> {
+  const absolute = path.resolve(target);
+  const trailing: string[] = [];
+  let current = absolute;
+
+  for (;;) {
+    try {
+      return path.join(await realpath(current), ...trailing.reverse());
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) return absolute; // reached the filesystem root
+      trailing.push(path.basename(current));
+      current = parent;
+    }
+  }
 }
 
 function assertInside(root: string, candidate: string): void {

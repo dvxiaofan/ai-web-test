@@ -50,7 +50,7 @@ describe("configuration", () => {
     expect(config.artifacts.directory).toBe("/tmp/ai-web-test-config/test-output/sample/artifacts");
     expect(config.runtime.enabled).toBe(true);
     expect(config.policy.maxRisk).toBe("read");
-    expect(config.policy.allowedHosts).toEqual(["localhost"]);
+    expect(config.policy.allowedHosts).toEqual(["localhost:4173"]);
     expect(config.digest).toHaveLength(64);
   });
 

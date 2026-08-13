@@ -60,4 +60,59 @@ describe('runtime inventory merge', () => {
       { url: 'http://app.test/products', reason: 'page-limit', detail: 'maxPages=0' },
     ]);
   });
+
+  describe('runtime-discovered routes get a module', () => {
+    // Without this, black-box discovery produces zero module nodes, scenarios
+    // inherit no moduleIds, and the by-module report tree drops every executed
+    // scenario — a green run that delivers no evidence.
+    const explore = (paths: string[]) =>
+      mergeBrowserExploration(inventory, {
+        status: 'completed',
+        baseUrl: 'http://app.test',
+        browserName: 'chromium',
+        startedAt: '2026-01-01T00:00:01.000Z',
+        endedAt: '2026-01-01T00:00:02.000Z',
+        warnings: [],
+        skipped: [],
+        pages: paths.map((routePath) => ({
+          requestedUrl: `http://app.test${routePath}`,
+          finalUrl: `http://app.test${routePath}`,
+          title: routePath,
+          httpStatus: 200,
+          rendered: true,
+          links: [],
+          controls: [],
+          console: [],
+          pageErrors: [],
+          durationMs: 10,
+          visualIssues: [],
+          accessibilityIssues: [],
+          network: [],
+        })),
+      });
+
+    it('creates a module node and points the route at it', () => {
+      const merged = explore(['/orders']);
+      const route = merged.nodes.find((node) => node.kind === 'route' && node.name === '/orders');
+      const module = merged.nodes.find((node) => node.kind === 'module' && node.name === 'orders');
+
+      expect(module).toBeDefined();
+      expect(route?.moduleId).toBe(module?.id);
+      expect((module as { routeIds: string[] }).routeIds).toContain(route?.id);
+    });
+
+    it('groups sibling routes under one module instead of one module each', () => {
+      const merged = explore(['/orders', '/orders/42']);
+      const modules = merged.nodes.filter((node) => node.kind === 'module' && node.name === 'orders');
+      expect(modules).toHaveLength(1);
+      expect((modules[0] as { routeIds: string[] }).routeIds).toHaveLength(2);
+    });
+
+    it('gives the page the same module as its route', () => {
+      const merged = explore(['/orders']);
+      const page = merged.nodes.find((node) => node.kind === 'page');
+      const module = merged.nodes.find((node) => node.kind === 'module' && node.name === 'orders');
+      expect(page?.moduleId).toBe(module?.id);
+    });
+  });
 });

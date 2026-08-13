@@ -43,7 +43,7 @@ import {
   summarizeInventory,
   type ExternalInventoryInput,
 } from './inventory/index.js';
-import { approvePlan, proposePlan, validateApprovedPlan } from './planning/index.js';
+import { approvePlan, assertPlanIsApproved, proposePlan, validateApprovedPlan } from './planning/index.js';
 import { generateRouteSmokeScenarios, loadScenarios, writeScenarios } from './scenarios/index.js';
 import { executePlan } from './execution/index.js';
 import { reportModelFromRun, writeHtmlReport, writeMarkdownReport } from './reporting/index.js';
@@ -184,7 +184,7 @@ async function commandInit(args: ReturnType<typeof parseCliArgs>, output: CliOut
     },
     policy: {
       maxRisk: 'read',
-      allowedHosts: [new URL(baseUrl).hostname],
+      allowedHosts: [new URL(baseUrl).host],
       allowExternalOrigins: false,
       destructiveActionAllowlist: [],
       confirmationRequired: true,
@@ -456,6 +456,7 @@ async function commandApprove(args: ReturnType<typeof parseCliArgs>, output: Cli
   if (!planId) throw new Error('No proposed plan found. Run `aitest plan` first.');
   const proposed = await store.readPlan(planId, 'proposed');
   const yes = getBooleanOption(args, 'yes');
+  const explicitApprover = getStringOption(args, 'by')?.trim();
   if (!yes) {
     if (!process.stdin.isTTY) {
       throw new Error('Approval requires an interactive terminal or the explicit --yes flag. --non-interactive does not imply approval.');
@@ -467,9 +468,14 @@ async function commandApprove(args: ReturnType<typeof parseCliArgs>, output: Cli
       );
       if (!approved) throw new Error('Operator declined the test plan. No test actions were executed.');
     });
+  } else if (explicitApprover === undefined || explicitApprover.length === 0) {
+    // With --yes nobody was prompted, so `$USER` would record whichever account
+    // the process happens to run under — in CI, a service account that approved
+    // nothing. Make the caller name a real approver instead of inventing one.
+    throw new Error('--yes requires --by <operator> so the approval records who accepted this plan. There is no default identity for a non-interactive approval.');
   }
   const approvalInput = {
-    approvedBy: getStringOption(args, 'by') ?? process.env.USER ?? process.env.USERNAME ?? 'operator',
+    approvedBy: explicitApprover ?? process.env.USER ?? process.env.USERNAME ?? 'operator',
     ...(getStringOption(args, 'note') ? { note: getStringOption(args, 'note') as string } : {}),
   };
   const approved = approvePlan(proposed, approvalInput, { inventory, scenarios });
@@ -487,6 +493,7 @@ async function commandRun(args: ReturnType<typeof parseCliArgs>, output: CliOutp
   const scenarios = await readScenarioCatalog(store, inventory, config.policy.allowSecretPersistence);
   const planId = getStringOption(args, 'plan') ?? await latestApprovedPlanId(store);
   if (!planId) throw new Error('No approved plan found. Run `aitest plan` followed by `aitest approve`.');
+  await assertPlanIsApproved(store, planId);
   const plan = await store.readPlan(planId, 'approved');
   const validation = validateApprovedPlan(plan, { inventory, scenarios });
   if (!validation.valid) throw new Error(`Approved plan is no longer valid:\n${validation.issues.map((issue) => `- ${issue.message}`).join('\n')}`);
@@ -721,7 +728,11 @@ async function commandDoctor(args: ReturnType<typeof parseCliArgs>, output: CliO
   }
 
   output.result({
-    ok: report.ok,
+    // Named `healthy`, not `ok`: the envelope's own `ok` means "the command
+    // ran", and a doctor run that successfully finds three errors is both a
+    // successful command and an unhealthy workspace. Collapsing the two into
+    // one field made the audit verdict silently unreadable.
+    healthy: report.ok,
     findings: report.findings,
     errors: report.findings.filter((finding) => finding.severity === 'error').length,
     warnings: report.findings.filter((finding) => finding.severity === 'warning').length,

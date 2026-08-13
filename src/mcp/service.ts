@@ -18,7 +18,7 @@ import { discoverSource } from '../discovery/index.js';
 import { exploreBrowser } from '../browser/index.js';
 import { mergeBrowserExploration, summarizeInventory } from '../inventory/index.js';
 import { queryInventory, type InventoryQuery } from '../inventory/queries.js';
-import { approvePlan, proposePlan, validateApprovedPlan, type PlanValidationResult } from '../planning/index.js';
+import { approvePlan, assertPlanIsApproved, proposePlan, validateApprovedPlan, type PlanValidationResult } from '../planning/index.js';
 import {
   generateRouteSmokeScenarios,
   loadScenarios,
@@ -39,6 +39,7 @@ import {
 } from '../reporting/index.js';
 import { writeProjectReport } from '../reporting/project-report.js';
 import { runDoctor, type DoctorReport } from '../agent/doctor.js';
+import { AgentError } from '../agent/protocol.js';
 import { withTargetProcess, type TargetProcessOptions } from '../runtime/index.js';
 import { classifyRunFailures } from '../healing/classifier.js';
 import { diffScenarios } from '../healing/semantic-diff.js';
@@ -442,9 +443,36 @@ export class McpService {
 
   // --- approve ------------------------------------------------------------
 
-  async approve(params: { planId?: string | undefined; by?: string | undefined; note?: string | undefined }): Promise<{
-    plan: RunPlan;
-  }> {
+  /**
+   * Approval is the one step an AI client must not be able to take on its own.
+   * The CLI enforces this with a TTY prompt or an explicit `--yes`; over MCP the
+   * caller *is* the assistant, so the gate has to live in the parameters:
+   * `confirm` must be explicitly true and `by` must name a real approver.
+   * Neither has a default — an assistant that omits them gets a refusal it can
+   * relay to the operator rather than a silently self-approved plan.
+   */
+  async approve(params: {
+    planId?: string | undefined;
+    by?: string | undefined;
+    note?: string | undefined;
+    confirm?: boolean | undefined;
+  }): Promise<{ plan: RunPlan }> {
+    if (params.confirm !== true) {
+      throw new AgentError(
+        'APPROVAL_REQUIRED',
+        'Approval requires explicit operator confirmation. Present the proposed plan (scope, risk, hosts, roles) to a human, then call awt_approve again with confirm=true and by=<the approving person>. An assistant must not set confirm on its own behalf.',
+        false,
+      );
+    }
+    const approvedBy = params.by?.trim() ?? '';
+    if (approvedBy.length === 0) {
+      throw new AgentError(
+        'APPROVAL_REQUIRED',
+        'Approval requires `by` to identify the approving operator. There is no default identity.',
+        false,
+      );
+    }
+
     const config = await this.loadConfig();
     const store = await this.store();
     const inventory = await this.readInventory(store);
@@ -456,7 +484,7 @@ export class McpService {
 
     const plan = approvePlan(
       proposed,
-      { approvedBy: params.by ?? 'mcp', ...(params.note ? { note: params.note } : {}) },
+      { approvedBy, ...(params.note ? { note: params.note } : {}) },
       { inventory, scenarios },
     );
 
@@ -491,6 +519,7 @@ export class McpService {
 
     const planId = params.planId ?? (await this.latestPlanByPrefix(store, 'approved-'));
     if (!planId) throw new Error('No approved plan found. Run `awt_plan` then `awt_approve`.');
+    await assertPlanIsApproved(store, planId);
     const plan = await store.readPlan(planId, 'approved');
 
     const validation = validateApprovedPlan(plan, { inventory, scenarios });

@@ -18,8 +18,13 @@ import type {
   TestScenario,
 } from "../core/types.js";
 
-const STATUS_LABEL: Record<string, string> = {
-  passed: "通过",
+/**
+ * Synthetic module for executed scenarios that belong to no discovered module,
+ * so their evidence still reaches the report tree instead of vanishing.
+ */
+const UNGROUPED_MODULE_ID = "module_ungrouped";
+
+const STATUS_LABEL: Record<string, string> = {  passed: "通过",
   failed: "失败",
   blocked: "已阻断",
   error: "错误",
@@ -700,13 +705,11 @@ export async function writeProjectReport(input: ProjectReportInput): Promise<Pro
   }
 
   const modulesOut: ModuleReportInfo[] = [];
-  for (const node of modules) {
-    const meta = metas.get(node.id);
-    if (!meta) continue;
-    const scenarioResults = moduleScenarioResults.get(node.id) ?? [];
-    // Module subdirectories are created only after tests execute; a module
-    // with no scenario results in this run gets no subdirectory.
-    if (scenarioResults.length === 0) continue;
+  const writeModuleReport = async (
+    node: InventoryNode,
+    meta: ModuleMeta,
+    scenarioResults: ScenarioResult[],
+  ): Promise<void> => {
     const dirName = moduleDirName(modulesOut, node);
     const modDir = path.join(rootDir, dirName);
     await mkdir(modDir, { recursive: true });
@@ -744,6 +747,40 @@ export async function writeProjectReport(input: ProjectReportInput): Promise<Pro
       htmlPath,
       scenarioCount: scenarioResults.length,
     });
+  };
+
+  for (const node of modules) {
+    const meta = metas.get(node.id);
+    if (!meta) continue;
+    const scenarioResults = moduleScenarioResults.get(node.id) ?? [];
+    // Module subdirectories are created only after tests execute; a module
+    // with no scenario results in this run gets no subdirectory.
+    if (scenarioResults.length === 0) continue;
+    await writeModuleReport(node, meta, scenarioResults);
+  }
+
+  // Anything that executed but belongs to no module still has to reach the
+  // reader. Dropping it silently is how a green run ends up delivering an empty
+  // report tree, which reads exactly like a clean handoff.
+  const grouped = new Set(
+    [...moduleScenarioResults.values()].flatMap((results) => results.map((result) => result.scenarioId)),
+  );
+  const ungrouped = (runResult?.scenarios ?? []).filter((result) => !grouped.has(result.scenarioId));
+  if (ungrouped.length > 0) {
+    const node: InventoryNode = {
+      id: UNGROUPED_MODULE_ID,
+      kind: "module",
+      name: "未归类场景",
+      description:
+        "这些场景已执行，但没有归属到任何业务模块（通常是发现阶段未能推断出模块）。此处保留其证据，避免结果丢失。",
+      tags: [],
+      confidence: 1,
+      evidence: [],
+      sourcePaths: [],
+      routeIds: [],
+      apiIds: [],
+    };
+    await writeModuleReport(node, { node, routeIds: [], apiIds: [], pageIds: [], scenarioCount: ungrouped.length }, ungrouped);
   }
 
   // Aggregate a per-module execution status: worst status wins.

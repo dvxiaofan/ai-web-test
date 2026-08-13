@@ -65,9 +65,17 @@ and coverage gaps.
 ## 5. Safety requirements
 
 - First run defaults to `discover` and `plan`; never implicit full execution.
-- Production-like hosts default to read-only unless explicitly allowlisted.
+- Every run defaults to read-only. Raising `maxRisk` is a deliberate config
+  change, and hosts whose name carries a production marker (`prod`,
+  `production`, `live`) are refused outright unless explicitly allowlisted.
+  This is a name check, not environment detection: a production host that is not
+  named like one — `www.example.com` — is indistinguishable from staging, so the
+  operator remains responsible for pointing `baseUrl` at a test environment.
 - Actions are classified as read-only, reversible mutation, or destructive.
 - Destructive actions require a plan-level opt-in and an action allowlist.
+- Approval is an act by a named operator, not a config value. A preset selects
+  scope; it can never carry an approval, and no interface — CLI or MCP — grants
+  one without an explicit confirmation and an approver identity.
 - Secrets come from environment variables and are redacted from artifacts.
 - Every excluded, blocked, or uncertain inventory item appears in the report.
 - CI has no interactive prompt; it must receive a previously approved plan or a

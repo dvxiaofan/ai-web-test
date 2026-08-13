@@ -16,10 +16,15 @@ assistant that operates AI Web Test.
 5. Run `aitest plan --scope ... --json`.
 6. Show plan scope, auto-included dependencies, risk level, hosts, roles,
    browsers, and expected mutations.
-7. Run `aitest approve --plan ...` only after explicit approval. In CI, use a
-   checked-in plan or a trusted preset; never infer approval from a passing
-   discovery step.
-8. Run `aitest run --plan ... --json`.
+7. Run `aitest approve --plan ...` only after explicit approval. Approval needs a
+   human and a name: interactively, answer the prompt; non-interactively, pass
+   `--yes --by <operator>`. Over MCP, `awt_approve` requires `confirm: true`
+   together with `by`. **Neither has a default identity — do not supply one on
+   your own behalf.** In CI, use a checked-in plan or a trusted preset; never
+   infer approval from a passing discovery step.
+8. Run `aitest run --plan ... --json`. Running a plan nobody approved is refused
+   with `PLAN_NOT_APPROVED`. That is a policy decision, not a broken file: go
+   back to step 7, and never create an `approved-*.json` yourself.
 9. Read `runs/<run-id>/result.json`, screenshots, traces, and report HTML.
 10. If an AI provider is configured, optionally run `aitest analyze --run ...`.
 11. Classify failures as confirmed, probable, environment, data, flaky, or
@@ -40,9 +45,11 @@ assistant that operates AI Web Test.
       (gated by `policy.allowSecretPersistence`); modules with no executed
       scenarios are omitted from the tree.
 13. Run `aitest doctor` (or MCP `awt_doctor`) before handing off. It exits
-    non-zero when a target-specific file leaked outside the workspace, the
-    report tree is missing despite existing runs, or a workspace file contains a
-    plaintext credential.
+    non-zero when a target-specific file leaked outside the workspace, an output
+    directory escapes the workspace (including through a symbolic link), the
+    report tree is missing or carries no module report despite existing runs, or
+    a workspace file contains a plaintext credential. In `--json`, read
+    `healthy` — the envelope's `ok` only means the command ran.
 
 ## The output workspace is a hard contract
 

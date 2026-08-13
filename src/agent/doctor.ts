@@ -3,7 +3,7 @@ import type { Stats } from "node:fs";
 import path from "node:path";
 
 import type { ProjectConfig } from "../core/config.js";
-import { isInsideDirectory } from "../core/artifacts.js";
+import { isInsideDirectory, isInsideDirectoryReal } from "../core/artifacts.js";
 import { pathExists } from "../core/json.js";
 import { resolveWorkspace, type Workspace } from "../core/workspace.js";
 import { findSecretMatches } from "../ai/redaction.js";
@@ -15,6 +15,7 @@ export interface DoctorFinding {
   code:
     | "workspace-escape"
     | "report-tree-missing"
+    | "report-tree-empty"
     | "leaked-file"
     | "plaintext-secret";
   severity: DoctorSeverity;
@@ -63,6 +64,7 @@ export async function runDoctor(config: ProjectConfig, options: DoctorOptions = 
   const findings: DoctorFinding[] = [];
 
   checkWorkspaceContainment(workspace, findings);
+  await checkWorkspaceSymlinks(workspace, findings);
   await checkReportTree(workspace, findings);
   await checkLeakedFiles(config, workspace, options.toolRoot ?? process.cwd(), findings);
   await checkPlaintextSecrets(workspace, findings);
@@ -86,23 +88,88 @@ function checkWorkspaceContainment(workspace: Workspace, findings: DoctorFinding
   }
 }
 
+/**
+ * The lexical containment check above cannot see through symbolic links, so a
+ * directory that merely *looks* contained can redirect every artifact outside
+ * the workspace. `loadConfig` rejects this for the two configured directories;
+ * this catches links introduced after the fact, or anywhere else under the
+ * workspace root.
+ */
+async function checkWorkspaceSymlinks(workspace: Workspace, findings: DoctorFinding[]): Promise<void> {
+  for (const [label, dir] of [
+    ["artifacts.directory", workspace.artifactsDir],
+    ["report.projectDirectory", workspace.reportDir],
+  ] as const) {
+    if (!isInsideDirectory(workspace.root, dir)) continue; // already reported
+    if (await isInsideDirectoryReal(workspace.root, dir)) continue;
+    findings.push({
+      code: "workspace-escape",
+      severity: "error",
+      message: `${label} resolves through a symbolic link to a location outside the project workspace.`,
+      path: dir,
+      suggestion: `Replace the link with a real directory under ${workspace.root}.`,
+    });
+  }
+}
+
 async function checkReportTree(workspace: Workspace, findings: DoctorFinding[]): Promise<void> {
   const indexPath = path.join(workspace.reportDir, "index.html");
-  if (await pathExists(indexPath)) return;
-
-  // A project that has never run legitimately has no report tree yet; one that
-  // has runs but no tree means the deliverable was never produced.
   const runsDir = path.join(workspace.artifactsDir, "runs");
   const hasRuns = (await safeReaddir(runsDir)).some((entry) => entry.startsWith("run_"));
+
+  if (!(await pathExists(indexPath))) {
+    // A project that has never run legitimately has no report tree yet; one that
+    // has runs but no tree means the deliverable was never produced.
+    findings.push({
+      code: "report-tree-missing",
+      severity: hasRuns ? "error" : "warning",
+      message: hasRuns
+        ? "Runs exist but the by-module report tree was never built."
+        : "No report tree yet — this target has not been run.",
+      path: indexPath,
+      suggestion: hasRuns ? "Run `aitest report --by-module`." : "Run `aitest run` once a plan is approved.",
+    });
+    return;
+  }
+
+  // An index.html on its own is not a deliverable. When scenarios executed but
+  // no module directory was written, the tree is a shell: no steps, no
+  // screenshots, no findings — and the run still reported success. Left
+  // unchecked this is the one failure that looks exactly like a clean handoff.
+  if (!hasRuns) return;
+  const moduleDirs = await countModuleDirectories(workspace.reportDir);
+  if (moduleDirs > 0) return;
   findings.push({
-    code: "report-tree-missing",
-    severity: hasRuns ? "error" : "warning",
-    message: hasRuns
-      ? "Runs exist but the by-module report tree was never built."
-      : "No report tree yet — this target has not been run.",
-    path: indexPath,
-    suggestion: hasRuns ? "Run `aitest report --by-module`." : "Run `aitest run` once a plan is approved.",
+    code: "report-tree-empty",
+    severity: "error",
+    message:
+      "Runs exist and the report index was built, but it contains no module report — the tree carries no executed-scenario evidence.",
+    path: workspace.reportDir,
+    suggestion:
+      "Check that discovery produced module nodes and that executed scenarios carry moduleIds, then rebuild with `aitest report --by-module`.",
   });
+}
+
+/** Count subdirectories of the report root that actually contain a module report. */
+async function countModuleDirectories(reportDir: string): Promise<number> {
+  const entries = await safeReaddir(reportDir);
+  let count = 0;
+  for (const entry of entries) {
+    const candidate = path.join(reportDir, entry);
+    // `index.html` sits beside the module directories, and statting a path
+    // *through* a file raises ENOTDIR rather than reporting "missing".
+    if (!(await isDirectory(candidate))) continue;
+    if (await pathExists(path.join(candidate, "module.html"))) count += 1;
+  }
+  return count;
+}
+
+async function isDirectory(candidate: string): Promise<boolean> {
+  try {
+    return (await stat(candidate)).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 async function checkLeakedFiles(
@@ -164,21 +231,36 @@ function describeSecret(match: string | undefined): string {
 }
 
 /**
- * Strings that mark a file as belonging to this target: the host under test and
- * the workspace path. Both are specific enough that a match is near-certainly a
- * target artifact rather than tool source.
+ * Strings that mark a file as belonging to this target.
+ *
+ * The workspace path is unambiguous. The host under test is not: a loopback
+ * address like `localhost:3000` appears in this tool's own defaults, in READMEs,
+ * and in half the web projects in existence, so matching on it alone reports
+ * tool source as a leaked target artifact. Loopback hosts are therefore excluded
+ * and the workspace path carries the check for those targets.
  */
 function leakNeedles(config: ProjectConfig, workspace: Workspace): string[] {
   const needles = [workspace.root];
   const baseUrl = config.target.baseUrl;
   if (baseUrl) {
     try {
-      needles.push(new URL(baseUrl).host);
+      const { host, hostname } = new URL(baseUrl);
+      if (!isLoopbackHostname(hostname)) needles.push(host);
     } catch {
       // A malformed baseUrl is already reported by config validation.
     }
   }
   return needles;
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  return (
+    normalized === "localhost" ||
+    normalized === "::1" ||
+    normalized.endsWith(".localhost") ||
+    /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(normalized)
+  );
 }
 
 function isDocLike(filePath: string): boolean {

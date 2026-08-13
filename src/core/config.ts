@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import { isInsideDirectory } from "./artifacts.js";
+import { isInsideDirectory, isInsideDirectoryReal } from "./artifacts.js";
 import { contentDigest, slugifyName, stableId } from "./ids.js";
 import { readJsonFile } from "./json.js";
 import { createDefaultPolicy, mergeTestPolicy } from "./policy.js";
@@ -148,7 +148,9 @@ export interface PresetConfigInput {
   roles?: string[];
   browserProfileIds?: string[];
   maxRisk?: ActionRisk;
-  approval?: Partial<PlanApproval>;
+  // Deliberately no `approval` field: a preset selects *what* to run, never
+  // whether it was approved. Approval is an act by a named operator, recorded
+  // on the plan itself — a config file cannot carry one.
 }
 
 export interface PresetConfig {
@@ -269,7 +271,37 @@ export class ConfigValidationError extends Error {
 export async function loadConfig(filePath: string): Promise<ProjectConfig> {
   const absolutePath = path.resolve(filePath);
   const raw = await readJsonFile<unknown>(absolutePath);
-  return validateConfig(raw, { configPath: absolutePath, configDir: path.dirname(absolutePath) });
+  const config = validateConfig(raw, { configPath: absolutePath, configDir: path.dirname(absolutePath) });
+  await assertWorkspaceContainmentThroughLinks(config);
+  return config;
+}
+
+/**
+ * Re-check containment with symlinks resolved.
+ *
+ * `validateConfig` stays synchronous, so its containment check is lexical and a
+ * directory name that is really a link to somewhere else passes it. Every
+ * command reaches the workspace through `loadConfig`, so resolving links here
+ * closes that gap before a single artifact is written, without making the
+ * synchronous validator do I/O.
+ */
+async function assertWorkspaceContainmentThroughLinks(config: ProjectConfig): Promise<void> {
+  const issues: ConfigValidationIssue[] = [];
+  const candidates: Array<[string, string]> = [["artifacts.directory", config.artifacts.directory]];
+  const reportDirectory = config.report.projectDirectory;
+  if (reportDirectory !== undefined && reportDirectory.trim().length > 0) {
+    candidates.push(["report.projectDirectory", path.resolve(config.configDir, reportDirectory)]);
+  }
+
+  for (const [field, directory] of candidates) {
+    if (await isInsideDirectoryReal(config.configDir, directory)) continue;
+    issues.push({
+      path: field,
+      code: "workspace",
+      message: `Output paths must stay inside the project workspace (${config.configDir}); ${field} resolves through a symbolic link to a location outside it.`,
+    });
+  }
+  if (issues.length > 0) throw new ConfigValidationError(issues);
 }
 
 /** Validate untrusted JSON and return a fully explicit, path-resolved config. */
@@ -631,6 +663,13 @@ function validatePresets(value: unknown, issues: ConfigValidationIssue[]): void 
     }
     validateStringArray(preset.roles, `presets.${name}.roles`, issues);
     validateStringArray(preset.browserProfileIds, `presets.${name}.browserProfileIds`, issues);
+    if (preset.approval !== undefined) {
+      issues.push({
+        path: `presets.${name}.approval`,
+        code: "security",
+        message: "A preset cannot carry an approval. Approval is recorded on a plan by a named operator via `aitest approve`.",
+      });
+    }
   }
 }
 

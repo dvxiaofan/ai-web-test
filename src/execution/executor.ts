@@ -108,7 +108,7 @@ export function classifyRoleStorageState(
   role: string,
   storageStateByRole: Record<string, string> | undefined,
 ): { blocked: boolean; storageState?: string; error?: string } {
-  if (role === 'anonymous') return { blocked: false, storageState: undefined };
+  if (role === 'anonymous') return { blocked: false };
   const storageState = storageStateByRole?.[role];
   if (!storageState) {
     return {

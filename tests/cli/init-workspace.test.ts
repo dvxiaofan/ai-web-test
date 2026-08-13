@@ -65,7 +65,7 @@ describe('init: per-target workspace layout', () => {
     expect(raw.target.rootDir).toBeUndefined();
     expect(raw.target.startCommand).toBeUndefined();
     expect(raw.target.baseUrl).toBe('http://10.0.0.5:9090');
-    expect(raw.policy.allowedHosts).toEqual(['10.0.0.5']);
+    expect(raw.policy.allowedHosts).toEqual(['10.0.0.5:9090']);
 
     const config = await loadConfig(configPath);
     expect(config.target.discovery).toBe('runtime-first');

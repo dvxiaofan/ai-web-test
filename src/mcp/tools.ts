@@ -106,10 +106,19 @@ export function registerMcpTools(server: McpServer, service: McpService): void {
     MCP_TOOLS.approve,
     {
       description:
-        'Approve a proposed plan (defaults to the latest proposed) and persist it as `approved-<id>.json`.',
+        'Approve a proposed plan (defaults to the latest proposed) and persist it as `approved-<id>.json`. ' +
+        'This is the operator gate, not a formality: show the proposed plan to a human first, then pass ' +
+        'confirm=true together with the approving person in `by`. Both are required and neither has a default — ' +
+        'an assistant must never approve a plan on its own behalf.',
       inputSchema: {
         planId: z.string().optional().describe('Plan id to approve; defaults to the latest proposed.'),
-        by: z.string().optional().describe('Approver identity.'),
+        by: z
+          .string()
+          .min(1)
+          .describe('Required. Identity of the human operator who approved this plan. Not the assistant.'),
+        confirm: z
+          .literal(true)
+          .describe('Required. Must be true, and only after a human reviewed the plan scope, risk, hosts, and roles.'),
         note: z.string().optional().describe('Approval note.'),
       },
     },

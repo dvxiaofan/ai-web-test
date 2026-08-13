@@ -1,4 +1,7 @@
+import { AgentError } from "../agent/protocol.js";
+import type { ArtifactStore } from "../core/artifacts.js";
 import { contentDigest, stableStringify } from "../core/ids.js";
+import { pathExists } from "../core/json.js";
 import { evaluatePolicy, isProductionLikeHostname } from "../core/policy.js";
 import type { Inventory, PlanApproval, RunPlan, TestScenario } from "../core/types.js";
 import { validateScope } from "./selectors.js";
@@ -270,6 +273,33 @@ export class PlanApprovalError extends Error {
     this.name = "PlanApprovalError";
     this.issues = issues;
   }
+}
+
+/**
+ * Refuse an unapproved plan *as a refusal*.
+ *
+ * Reading `approved-<id>.json` straight off disk turns "you skipped the gate"
+ * into a file-not-found error: it reads like a tooling fault rather than a
+ * policy decision, and it names the exact path a caller would have to create to
+ * proceed. An assistant trying to be helpful can take that as an invitation to
+ * forge the file. Checking first lets the caller see what actually happened and
+ * what the legitimate next step is.
+ */
+export async function assertPlanIsApproved(
+  store: Pick<ArtifactStore, "planPath">,
+  planId: string,
+): Promise<void> {
+  const approvedPath = store.planPath(planId, "approved");
+  if (await pathExists(approvedPath)) return;
+
+  const proposedExists = await pathExists(store.planPath(planId, "proposed"));
+  throw new AgentError(
+    "PLAN_NOT_APPROVED",
+    proposedExists
+      ? `Plan ${planId} is proposed but not approved, so it cannot be executed. An operator must review and approve it first: \`aitest approve --plan ${planId}\` (interactive) or \`--yes --by <operator>\` in CI. Do not create the approved plan file yourself — approval is a human decision, not a missing file.`
+      : `No plan ${planId} was found. Run \`aitest plan\` to propose one, then \`aitest approve\`.`,
+    false,
+  );
 }
 
 function validateTargetAndPolicy(plan: RunPlan, issues: PlanValidationIssue[]): void {

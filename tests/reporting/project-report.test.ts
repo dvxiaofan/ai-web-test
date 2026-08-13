@@ -173,4 +173,27 @@ describe("project-report", () => {
     expect(existsSync(result.indexHtmlPath)).toBe(true);
     expect(result.modules).toHaveLength(0);
   });
+
+  it("keeps executed scenarios that belong to no module instead of dropping them", async () => {
+    // A run whose scenarios carry no moduleIds used to produce index.html and
+    // nothing else: every step, screenshot, and finding silently discarded
+    // while the run still reported success.
+    const artifactsDir = tmp("artifacts");
+    const shotsDir = tmp("shots-ungrouped");
+    const shot = writePng(shotsDir, "loose.png");
+    const config = buildConfig(artifactsDir);
+    const scenarios = buildScenarios().map((scenario) => ({ ...scenario, moduleIds: [] }));
+    const runResult = buildRunResult(shot, shot);
+
+    const result = await writeProjectReport({ config, inventory: buildInventory(), scenarios, runResult });
+
+    const ungrouped = result.modules.find((module) => module.moduleName === "未归类场景");
+    expect(ungrouped).toBeDefined();
+    expect(ungrouped!.scenarioCount).toBe(2);
+
+    const html = readFileSync(ungrouped!.htmlPath, "utf8");
+    expect(html).toContain("<img");
+    expect(html).toContain("后台按钮缺失");
+    expect(existsSync(path.join(ungrouped!.dir, "screenshot-001.png"))).toBe(true);
+  });
 });

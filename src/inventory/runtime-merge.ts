@@ -5,9 +5,11 @@ import {
   type Finding,
   type Inventory,
   type InventoryNode,
+  type ModuleInventoryNode,
   type PageInventoryNode,
   type RouteInventoryNode,
 } from '../core/index.js';
+import { inferRouteModule } from '../discovery/classify.js';
 import type { BrowserExplorationResult, BrowserPageObservation, NetworkObservation, SkippedBrowserTarget } from '../browser/index.js';
 
 export function mergeBrowserExploration(
@@ -113,6 +115,48 @@ function skippedTargetFindings(
   });
 }
 
+/**
+ * Give a runtime-discovered route a module, creating the module node if this is
+ * the first route to land in it.
+ *
+ * Without this, black-box discovery (`runtime-first`, or any target whose
+ * routes are only found by the browser) produces an inventory with zero module
+ * nodes. Scenarios generated from those routes then carry no `moduleIds`, and
+ * the by-module report tree silently drops every executed scenario — a run that
+ * passes but delivers no evidence. Module names come from the same
+ * `inferRouteModule` heuristic the static path uses, so `/orders/42` groups
+ * under `orders` whichever way it was discovered.
+ */
+function upsertRuntimeModule(nodes: InventoryNode[], routePath: string, now: string): ModuleInventoryNode {
+  const name = inferRouteModule(routePath, 'root');
+  const id = stableId('module', name);
+  const existing = nodes.find((node): node is ModuleInventoryNode => node.kind === 'module' && node.id === id);
+  if (existing) return existing;
+
+  const module: ModuleInventoryNode = {
+    id,
+    kind: 'module',
+    name,
+    tags: ['runtime-discovered'],
+    confidence: 0.6,
+    evidence: [
+      {
+        id: stableId('evidence', 'runtime-module', id),
+        kind: 'runtime',
+        summary: `Module inferred from runtime-discovered route ${routePath}.`,
+        confidence: 0.6,
+        observedAt: now,
+      },
+    ],
+    sourcePaths: [],
+    routeIds: [],
+    apiIds: [],
+    metadata: { discoveredAtRuntime: true },
+  };
+  nodes.push(module);
+  return module;
+}
+
 function upsertRuntimeRoute(
   nodes: InventoryNode[],
   inventory: Inventory,
@@ -131,11 +175,13 @@ function upsertRuntimeRoute(
     return existing;
   }
 
+  const module = upsertRuntimeModule(nodes, routePath, now);
   const route: RouteInventoryNode = {
     id: stableId('route', `${inventory.project.id}:${routePath}`),
     kind: 'route',
     name: page.title || routePath,
     path: routePath,
+    moduleId: module.id,
     tags: ['runtime-discovered'],
     confidence: page.rendered ? 0.98 : 0.65,
     evidence: [evidence],
@@ -143,6 +189,7 @@ function upsertRuntimeRoute(
     roleIds: [],
     metadata: { discoveredAtRuntime: true },
   };
+  if (!module.routeIds.includes(route.id)) module.routeIds.push(route.id);
   nodes.push(route);
   return route;
 }
