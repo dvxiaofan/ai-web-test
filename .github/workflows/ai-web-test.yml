@@ -15,7 +15,7 @@ jobs:
       CODEBUDDY_API_KEY: ${{ secrets.CODEBUDDY_API_KEY }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           # Pin Node via .nvmrc (committed in Batch 0.1) for reproducible installs.
           node-version-file: .nvmrc
