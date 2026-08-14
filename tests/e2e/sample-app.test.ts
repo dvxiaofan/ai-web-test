@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { exploreBrowser } from '../../src/browser/index.js';
 import { createDefaultPolicy } from '../../src/core/index.js';
+import type { BrowserProfile } from '../../src/core/types.js';
 import { discoverSource } from '../../src/discovery/index.js';
 import { mergeBrowserExploration } from '../../src/inventory/index.js';
 import { approvePlan, proposePlan } from '../../src/planning/index.js';
@@ -40,7 +41,7 @@ describe.skipIf(!runE2E)('sample app end-to-end workflow', () => {
     return mergeBrowserExploration(draft.inventory, exploration);
   }
 
-  function makeBrowserProfile() {
+  function makeBrowserProfile(): BrowserProfile[] {
     return [{ id: 'chromium', browser: 'chromium', headless: true, viewport: { width: 1280, height: 800 } }];
   }
 

@@ -117,11 +117,13 @@ describe('McpService healing + history (Phase 6 wiring)', () => {
           scenarioResult('scn-loc', 'failed', {
             steps: [
               {
-                id: 'l',
+                stepId: 'l',
                 action: 'click',
                 status: 'failed',
+                startedAt: '2026-07-28T00:01:00.000Z',
+                assertions: [],
+                artifacts: [],
                 error: { name: 'Error', message: 'no element matches selector' },
-                target: { strategy: 'role', value: 'button', name: 'Submit' },
               },
             ],
           }),

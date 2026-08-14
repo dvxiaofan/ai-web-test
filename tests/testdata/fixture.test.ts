@@ -11,10 +11,10 @@ describe("compileFixture", () => {
 
   it("normalizes records with deterministic ids", () => {
     expect(records).toHaveLength(2);
-    expect(records[0].id).toBe("tdns:m:x:order-1");
-    expect(records[1].id).toBe("tdns:m:x:order-2");
-    expect(records[0].cleanup).toBe("auto");
-    expect(records[1].cleanup).toBe("manual");
+    expect(records[0]!.id).toBe("tdns:m:x:order-1");
+    expect(records[1]!.id).toBe("tdns:m:x:order-2");
+    expect(records[0]!.cleanup).toBe("auto");
+    expect(records[1]!.cleanup).toBe("manual");
   });
 });
 

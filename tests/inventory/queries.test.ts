@@ -17,8 +17,8 @@ describe("queryInventory", () => {
     const result = queryInventory({ action: "modules" }, inventory) as {
       modules: Array<{ id: string; routeIds: string[] }>;
     };
-    expect(result.modules[0].id).toBe("mod-users");
-    expect(result.modules[0].routeIds).toContain("r-users-list");
+    expect(result.modules[0]!.id).toBe("mod-users");
+    expect(result.modules[0]!.routeIds).toContain("r-users-list");
   });
 
   it("module returns a single node by id", () => {
@@ -41,7 +41,7 @@ describe("queryInventory", () => {
   });
 
   it("gaps reflects current scenario coverage", () => {
-    const [scenario] = importProposals([buildValidProposal()], inventory).scenarios;
+    const scenario = importProposals([buildValidProposal()], inventory).scenarios[0]!;
     const result = queryInventory({ action: "gaps", scenarios: [scenario] }, inventory) as {
       gaps: Array<{ kind: string }>;
     };

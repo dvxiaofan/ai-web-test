@@ -12,6 +12,7 @@ function makeSurface(opts: {
     fill: async () => {},
     click: async () => {},
     getUrl: async () => 'https://app/home',
+    waitForUrl: async () => {},
     getText: async () => opts.errorText ?? null,
     isVisible: async (s) => opts.visible?.[s] ?? false,
     captureStorageState: async () => opts.storageState ?? { cookies: [], origins: [] },

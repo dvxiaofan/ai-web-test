@@ -18,7 +18,7 @@ describe("computeCoverage", () => {
 
   it("separates discovery coverage from test coverage", () => {
     const inventory = buildTestInventory();
-    const [scenario] = importProposals([buildValidProposal()], inventory).scenarios;
+    const scenario = importProposals([buildValidProposal()], inventory).scenarios[0]!;
     const report = computeCoverage(inventory, [scenario]);
 
     const routes = report.dimensions.find((d) => d.name === "routes")!;

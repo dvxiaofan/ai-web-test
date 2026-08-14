@@ -55,8 +55,7 @@ describe('diffScenarios', () => {
   });
 
   it('flags dropped expected values as assertion-weakened', () => {
-    const noExpected: AssertStep = { id: 's2', action: 'assert', risk: 'read', assertion: 'text', locator: assertStep.locator as AssertStep['locator'], comparator: 'equals' };
-    delete (noExpected as Partial<AssertStep>).expected;
+    const { expected: _dropped, ...noExpected } = assertStep;
     const diff = diffScenarios(makeScenario([assertStep]), makeScenario([noExpected]));
     expect(diff.changes.map((c) => c.kind)).toContain('assertion-weakened');
   });
@@ -76,14 +75,14 @@ describe('diffScenarios', () => {
   });
 
   it('classifies testId locator updates as test-id-updated', () => {
-    const before = makeScenario([{ id: 's3', action: 'click', risk: 'low', locator: { strategy: 'testId', value: 'save-btn' } }]);
-    const after = makeScenario([{ id: 's3', action: 'click', risk: 'low', locator: { strategy: 'testId', value: 'save-button' } }]);
+    const before = makeScenario([{ id: 's3', action: 'click', risk: 'mutate', locator: { strategy: 'testId', value: 'save-btn' } }]);
+    const after = makeScenario([{ id: 's3', action: 'click', risk: 'mutate', locator: { strategy: 'testId', value: 'save-button' } }]);
     expect(diffScenarios(before, after).changes.map((c) => c.kind)).toContain('test-id-updated');
   });
 
   it('classifies same-role name changes as accessible-name-updated', () => {
-    const before = makeScenario([{ id: 's3', action: 'click', risk: 'low', locator: { strategy: 'role', value: 'button', name: 'Save' } }]);
-    const after = makeScenario([{ id: 's3', action: 'click', risk: 'low', locator: { strategy: 'role', value: 'button', name: 'Save changes' } }]);
+    const before = makeScenario([{ id: 's3', action: 'click', risk: 'mutate', locator: { strategy: 'role', value: 'button', name: 'Save' } }]);
+    const after = makeScenario([{ id: 's3', action: 'click', risk: 'mutate', locator: { strategy: 'role', value: 'button', name: 'Save changes' } }]);
     expect(diffScenarios(before, after).changes.map((c) => c.kind)).toContain('accessible-name-updated');
   });
 
@@ -95,7 +94,7 @@ describe('diffScenarios', () => {
 
   it('detects role changes, risk increases and skip flags', () => {
     const before = makeScenario([navigate]);
-    const after = makeScenario([navigate], { roleIds: ['viewer'], risk: 'high', metadata: { skip: true } });
+    const after = makeScenario([navigate], { roleIds: ['viewer'], risk: 'destructive', metadata: { skip: true } });
     const kinds = diffScenarios(before, after).changes.map((c) => c.kind);
     expect(kinds).toContain('role-changed');
     expect(kinds).toContain('risk-increased');
@@ -103,7 +102,7 @@ describe('diffScenarios', () => {
   });
 
   it('detects removed cleanup steps as cleanup-removed', () => {
-    const cleanup: ScenarioStep = { id: 's9', action: 'click', risk: 'low', locator: { strategy: 'testId', value: 'delete-row' }, metadata: { cleanup: true } };
+    const cleanup: ScenarioStep = { id: 's9', action: 'click', risk: 'mutate', locator: { strategy: 'testId', value: 'delete-row' }, metadata: { cleanup: true } };
     const diff = diffScenarios(makeScenario([navigate, cleanup]), makeScenario([navigate]));
     expect(diff.changes.map((c) => c.kind)).toContain('cleanup-removed');
   });

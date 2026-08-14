@@ -8,7 +8,7 @@ describe("importProposals", () => {
     const result = importProposals([buildValidProposal()], inventory);
     expect(result.rejected).toEqual([]);
     expect(result.scenarios).toHaveLength(1);
-    const scenario = result.scenarios[0];
+    const scenario = result.scenarios[0]!;
     expect(scenario.routeIds).toEqual(["r-users-list"]);
     expect(scenario.moduleIds).toEqual(["mod-users"]);
     expect(scenario.roleIds).toEqual(["role-admin"]);
@@ -27,7 +27,7 @@ describe("importProposals", () => {
     const inventory = buildTestInventory();
     const first = importProposals([buildValidProposal()], inventory).scenarios;
     const second = importProposals([buildValidProposal()], inventory).scenarios;
-    expect(first[0].id).toBe(second[0].id);
+    expect(first[0]!.id).toBe(second[0]!.id);
     const merged = mergeCatalog(first, second);
     expect(merged).toHaveLength(1);
   });
@@ -41,7 +41,7 @@ describe("importProposals", () => {
     });
     const result = importProposals([proposal], inventory);
     expect(result.rejected).toEqual([]);
-    expect(result.scenarios[0].steps[0].action).toBe("fill");
+    expect(result.scenarios[0]!.steps[0]!.action).toBe("fill");
   });
 
   it("rejects a read-only proposal that performs a mutating step", () => {
@@ -53,6 +53,6 @@ describe("importProposals", () => {
     });
     const result = importProposals([proposal], inventory);
     expect(result.scenarios).toEqual([]);
-    expect(result.rejected[0].reason).toContain("mutate");
+    expect(result.rejected[0]!.reason).toContain("mutate");
   });
 });

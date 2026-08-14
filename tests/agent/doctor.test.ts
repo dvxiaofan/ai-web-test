@@ -3,7 +3,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 
-import type { ProjectConfig } from "../../src/core/types.js";
+import type { ProjectConfig } from "../../src/core/config.js";
 import { runDoctor, type DoctorFinding } from "../../src/agent/doctor.js";
 
 const BASE_URL = "http://10.150.2.184:9090";

@@ -31,8 +31,8 @@ describe('compileControlledSpec', () => {
     const result = compileControlledSpec(readSpec(), policy, BASE_URL);
     expect(result.scenario.source).toBe('imported');
     expect(result.actions).toHaveLength(1);
-    expect(result.actions[0].policyAllowed).toBe(true);
-    expect(result.actions[0].description).toBe('open');
+    expect(result.actions[0]!.policyAllowed).toBe(true);
+    expect(result.actions[0]!.description).toBe('open');
   });
 
   it('flags a mutating step as policy-violating when the plan is read-only', () => {
@@ -93,9 +93,9 @@ describe('compileScenarioActions (DSL)', () => {
       prerequisites: [],
       evidence: [],
       createdAt: new Date().toISOString(),
-      steps: [{ id: 's1', action: 'navigate', description: 'open', risk: 'read', url: `${BASE_URL}/` }],
+      steps: [{ id: 's1', action: 'navigate', name: 'open', risk: 'read', url: `${BASE_URL}/` }],
     };
     const actions = compileScenarioActions(scenario, policy, BASE_URL);
-    expect(actions[0].policyAllowed).toBe(true);
+    expect(actions[0]!.policyAllowed).toBe(true);
   });
 });

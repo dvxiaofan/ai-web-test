@@ -31,9 +31,9 @@ describe("buildStateModel", () => {
 
   it("derives transitions from before/after pairs", () => {
     expect(model.transitions).toHaveLength(1);
-    expect(model.transitions[0].fromStateId).toBe("st:draft");
-    expect(model.transitions[0].toStateId).toBe("st:submitted");
-    expect(model.transitions[0].actionId).toBe("ba:mod:orders:submit");
+    expect(model.transitions[0]!.fromStateId).toBe("st:draft");
+    expect(model.transitions[0]!.toStateId).toBe("st:submitted");
+    expect(model.transitions[0]!.actionId).toBe("ba:mod:orders:submit");
   });
 
   it("identifies initial and terminal states", () => {

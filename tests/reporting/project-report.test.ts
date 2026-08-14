@@ -3,7 +3,8 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 
-import type { Inventory, ProjectConfig, RunResult, TestScenario } from "../../src/core/types.js";
+import type { ProjectConfig } from "../../src/core/config.js";
+import type { Inventory, RunResult, TestScenario } from "../../src/core/types.js";
 import { writeProjectReport, resolveProjectReportDir } from "../../src/reporting/project-report.js";
 
 const PNG = Buffer.from(
@@ -156,7 +157,7 @@ describe("project-report", () => {
 
     // Module HTML references the copied screenshot and the problem section.
     const homeHtml = readFileSync(homeModule!.htmlPath, "utf8");
-    expect(homeHtml).toContain("module.html" === "" ? "" : "测试业务模块");
+    expect(homeHtml).toContain("测试业务模块");
     expect(homeHtml).toContain("<img");
     expect(existsSync(path.join(homeModule!.dir, "screenshot-001.png"))).toBe(true);
 

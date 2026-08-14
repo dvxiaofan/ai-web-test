@@ -31,6 +31,7 @@ describe('authenticate dispatch', () => {
       fill: async () => {},
       click: async () => {},
       getUrl: async () => 'x',
+      waitForUrl: async () => {},
       getText: async () => null,
       isVisible: async () => false,
       captureStorageState: async () => ({ cookies: [{ name: 'c', value: 'v' }], origins: [] }),

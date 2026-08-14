@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import type { Inventory, ProjectConfig, ProjectOverview, RunResult, TestScenario } from '../../src/core/types.js';
+import type { ProjectConfig } from '../../src/core/config.js';
+import type { Inventory, ProjectOverview, RunResult, TestScenario } from '../../src/core/types.js';
 import { writeProjectReport } from '../../src/reporting/project-report.js';
 
 const dirs: string[] = [];

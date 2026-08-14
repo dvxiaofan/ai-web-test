@@ -16,8 +16,8 @@ describe('toEvidenceRefs', () => {
     });
     expect(refs.length).toBe(3);
     expect(refs.every((ref) => ref.kind === 'runtime')).toBe(true);
-    expect(refs[0].summary).not.toContain('secret-token');
-    expect(refs[0].summary).toContain('[REDACTED]');
+    expect(refs[0]!.summary).not.toContain('secret-token');
+    expect(refs[0]!.summary).toContain('[REDACTED]');
   });
 
   it('handles empty snapshots', () => {
@@ -39,7 +39,7 @@ describe('EvidenceCollector', () => {
     });
     const records = collector.records();
     expect(records.length).toBe(3);
-    expect(records[0].summary).toContain('[REDACTED]');
+    expect(records[0]!.summary).toContain('[REDACTED]');
     expect(records.some((r) => r.summary.startsWith('pageerror:'))).toBe(true);
     expect(records.some((r) => r.summary.startsWith('request failed:'))).toBe(true);
   });
@@ -48,8 +48,8 @@ describe('EvidenceCollector', () => {
     const collector = new EvidenceCollector();
     collector.markCleanupFailure('demo row not removed');
     const records = collector.records();
-    expect(records[0].kind).toBe('operator');
-    expect(records[0].summary).toContain('cleanup-failure');
+    expect(records[0]!.kind).toBe('operator');
+    expect(records[0]!.summary).toContain('cleanup-failure');
   });
 
   it('stops collecting after detach', () => {

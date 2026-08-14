@@ -3,7 +3,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 
-import type { ProjectConfig } from "../../src/core/types.js";
+import type { ProjectConfig } from "../../src/core/config.js";
 import { ensureWorkspace, isInsideWorkspace, resolveWorkspace } from "../../src/core/workspace.js";
 
 function tmp(name: string): string {

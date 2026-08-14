@@ -38,7 +38,6 @@ describe('McpService (no browser required)', () => {
     const inventory = stripUndefined(buildTestInventory());
     inventory.schemaVersion = 1;
     inventory.generatedAt = new Date().toISOString();
-    inventory.credentials = inventory.credentials ?? [];
     inventory.project.id = inventory.project.id ?? 'test-app';
     inventory.project.rootDir = inventory.project.rootDir ?? '/tmp/test-app';
     for (const node of inventory.nodes) {
